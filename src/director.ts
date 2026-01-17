@@ -133,6 +133,21 @@ export class Director {
         this.rewriteFiles.delete(filename);
     }
 
+    public resetFileProgress(filename: string): void {
+        if (!this.isMultiFile()) {
+            return;
+        }
+        const fileIndex = this.fileScripts.findIndex(file => file.filename === filename);
+        if (fileIndex === -1) {
+            return;
+        }
+        this.fileBufferIndices[fileIndex] = 0;
+        if (this.currentFileIndex === fileIndex) {
+            this.script = this.fileScripts[fileIndex].content;
+        }
+        console.log(`Reset progress for file ${filename} to start typing from beginning`);
+    }
+
     public getNextChar(): string {
         if (this.isMultiFile()) {
             // Use per-file buffer tracking

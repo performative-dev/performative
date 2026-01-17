@@ -1765,6 +1765,7 @@ async function handleNextFile(currentEditor: vscode.TextEditor): Promise<void> {
 		try {
 			await vscode.workspace.fs.delete(fileUri, { useTrash: false });
 			createdFiles.delete(nextFile.filename);
+			director?.resetFileProgress(nextFile.filename);
 			log(`Rewriting file for extension: ${nextFile.filename}`);
 		} catch (error) {
 			log(`Failed to delete file for rewrite ${nextFile.filename}: ${error}`);
@@ -1819,6 +1820,7 @@ async function handleRandomFileSwitch(currentEditor: vscode.TextEditor): Promise
 		try {
 			await vscode.workspace.fs.delete(fileUri, { useTrash: false });
 			createdFiles.delete(newFile.filename);
+			director?.resetFileProgress(newFile.filename);
 			log(`Rewriting file for extension: ${newFile.filename}`);
 		} catch (error) {
 			log(`Failed to delete file for rewrite ${newFile.filename}: ${error}`);
