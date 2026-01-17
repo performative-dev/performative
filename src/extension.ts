@@ -56,6 +56,8 @@ const guiActions = [
 	{ name: 'copilot distraction', command: 'custom:copilotDistraction' },
 	// Intrusive thought - types an embarrassing comment then frantically deletes it
 	{ name: 'intrusive thought', command: 'custom:intrusiveThought' },
+	// Heavy install - opens terminal and simulates npm dependency hell
+	{ name: 'heavy install', command: 'custom:heavyInstall' },
 ];
 
 // Intrusive thoughts that "accidentally" get typed before being frantically deleted
@@ -85,6 +87,39 @@ const intrusiveThoughts = [
 // Track keystrokes since last intrusive thought (to make it rare but not too rare)
 let keystrokesSinceLastIntrusiveThought = 0;
 const MIN_KEYSTROKES_BETWEEN_INTRUSIVE = 200; // Only allow intrusive thoughts every 200+ keystrokes
+
+// Ridiculous npm packages for the "Heavy Install" feature
+const ridiculousPackages = [
+	"is-thirteen",
+	"is-odd-enterprise-edition",
+	"left-pad-as-a-service",
+	"left-pad-premium",
+	"is-array-array-array",
+	"blockchain-hello-world",
+	"ai-blockchain-synergy",
+	"react-but-slower",
+	"jquery-legacy-legacy",
+	"node_modules-in-node_modules",
+	"dependency-hell-v2",
+	"text-align-center",
+	"is-promise-maybe",
+	"uuid-generator-generator",
+	"config-config-config",
+	"mongo-to-postgres-to-mongo",
+	"webpack-webpack-plugin",
+	"babel-plugin-babel-plugin",
+	"lodash-but-bigger",
+	"moment-timezone-timezone",
+	"express-express-express",
+	"is-even-ai-powered",
+	"left-right-pad",
+	"json-to-json",
+	"async-async-await",
+];
+
+// Track keystrokes since last heavy install
+let keystrokesSinceLastHeavyInstall = 0;
+const MIN_KEYSTROKES_BETWEEN_HEAVY_INSTALL = 600; // Only allow heavy install every 600+ keystrokes
 
 // Funny questions to ask Copilot during "coding"
 // Note: Set your Copilot model to a fast one (e.g., GPT-4o-mini) manually for quicker responses
@@ -130,7 +165,13 @@ async function performRandomGuiAction(): Promise<void> {
 	isPerformingGuiAction = true;
 
 	let action = guiActions[Math.floor(Math.random() * guiActions.length)];
-	
+
+	// GUARANTEED: Force heavy install if cooldown has passed (high-impact visual)
+	if (keystrokesSinceLastHeavyInstall >= MIN_KEYSTROKES_BETWEEN_HEAVY_INSTALL) {
+		action = { name: 'heavy install', command: 'custom:heavyInstall' };
+		log('Forcing heavy install - cooldown passed');
+	}
+
 	// If copilot was selected but not enough keystrokes have passed, pick a different action
 	if (action.command === 'custom:copilotDistraction' && keystrokesSinceLastCopilot < MIN_KEYSTROKES_BETWEEN_COPILOT) {
 		log(`Skipping copilot distraction - only ${keystrokesSinceLastCopilot}/${MIN_KEYSTROKES_BETWEEN_COPILOT} keystrokes since last one`);
@@ -146,13 +187,25 @@ async function performRandomGuiAction(): Promise<void> {
 		const otherActions = guiActions.filter(a => a.command !== 'custom:intrusiveThought' && a.command !== 'custom:copilotDistraction');
 		action = otherActions[Math.floor(Math.random() * otherActions.length)];
 	}
+
+	// If heavy install was selected but not enough keystrokes have passed, pick a different action
+	if (action.command === 'custom:heavyInstall' && keystrokesSinceLastHeavyInstall < MIN_KEYSTROKES_BETWEEN_HEAVY_INSTALL) {
+		log(`Skipping heavy install - only ${keystrokesSinceLastHeavyInstall}/${MIN_KEYSTROKES_BETWEEN_HEAVY_INSTALL} keystrokes since last one`);
+		// Pick a different action (exclude heavy install, intrusive thought, and copilot)
+		const otherActions = guiActions.filter(a =>
+			a.command !== 'custom:heavyInstall' &&
+			a.command !== 'custom:intrusiveThought' &&
+			a.command !== 'custom:copilotDistraction'
+		);
+		action = otherActions[Math.floor(Math.random() * otherActions.length)];
+	}
 	
 	log(`Performing GUI action: ${action.name}`);
 
-	// Capture current editor state BEFORE any action
+	// Capture current editor state BEFORE any action (use offset for reliability)
 	const editorBefore = vscode.window.activeTextEditor;
 	const documentUriBefore = editorBefore?.document.uri;
-	const cursorPositionBefore = editorBefore?.selection.active;
+	const cursorOffsetBefore = editorBefore ? editorBefore.document.offsetAt(editorBefore.selection.active) : 0;
 
 	if (action.command === 'custom:toggleTerminal') {
 		// Custom terminal toggle that never takes focus
@@ -206,17 +259,27 @@ async function performRandomGuiAction(): Promise<void> {
 			processNextKeystroke();
 		}
 		return;
+	} else if (action.command === 'custom:heavyInstall') {
+		// Perform the heavy install - npm dependency hell simulator
+		await performHeavyInstall();
+		keystrokesSinceLastHeavyInstall = 0; // Reset the counter
+		isPerformingGuiAction = false;
+		if (keystrokeQueue.length > 0) {
+			processNextKeystroke();
+		}
+		return;
 	} else {
 		await vscode.commands.executeCommand(action.command);
 	}
 
-	// Quick restore of editor focus and cursor (no long delays)
-	if (documentUriBefore && cursorPositionBefore) {
+	// Quick restore of editor focus and cursor using offset (no long delays)
+	if (documentUriBefore && editorBefore) {
 		// Focus the correct editor
 		const currentEditor = vscode.window.activeTextEditor;
 		if (currentEditor && currentEditor.document.uri.toString() === documentUriBefore.toString()) {
-			// Same editor still active, just restore cursor
-			currentEditor.selection = new vscode.Selection(cursorPositionBefore, cursorPositionBefore);
+			// Same editor still active, just restore cursor using offset
+			const restorePos = currentEditor.document.positionAt(cursorOffsetBefore);
+			currentEditor.selection = new vscode.Selection(restorePos, restorePos);
 		} else {
 			// Different editor active, find and focus ours
 			const editors = vscode.window.visibleTextEditors;
@@ -229,7 +292,8 @@ async function performRandomGuiAction(): Promise<void> {
 				});
 				const editor = vscode.window.activeTextEditor;
 				if (editor) {
-					editor.selection = new vscode.Selection(cursorPositionBefore, cursorPositionBefore);
+					const restorePos = editor.document.positionAt(cursorOffsetBefore);
+					editor.selection = new vscode.Selection(restorePos, restorePos);
 				}
 			}
 		}
@@ -295,14 +359,14 @@ async function performCopilotDistraction(): Promise<void> {
 		
 		// Wait a moment for the chat to open and for any stray keystrokes to settle
 		await sleep(600);
-		
+
 		// Clear any gibberish that may have been typed by user keystrokes
 		// Select all text in the input and delete it
 		await vscode.commands.executeCommand('editor.action.selectAll');
 		await sleep(50);
 		await vscode.commands.executeCommand('deleteLeft');
 		await sleep(100);
-		
+
 		// Type the question character by character for visual effect
 		await typeTextSlowly(question, 25);
 		
@@ -639,11 +703,103 @@ async function performIntrusiveThought(): Promise<void> {
 	log('Intrusive thought complete - crisis averted!');
 }
 
+// Perform the heavy install - npm dependency hell simulator
+async function performHeavyInstall(): Promise<void> {
+	log('Starting heavy install...');
+
+	// Capture current editor state BEFORE opening terminal
+	// Use offset (not Position) for reliable restoration
+	const editorBefore = vscode.window.activeTextEditor;
+	if (!editorBefore) {
+		log('No active editor for heavy install');
+		return;
+	}
+	const documentUriBefore = editorBefore.document.uri;
+	const cursorOffset = editorBefore.document.offsetAt(editorBefore.selection.active);
+
+	// Get or create terminal
+	let terminal = vscode.window.activeTerminal;
+	if (!terminal) {
+		terminal = vscode.window.createTerminal('Performative');
+	}
+	terminal.show(true); // true = preserve focus on editor
+
+	// Shuffle and pick 5-8 random packages
+	const shuffled = [...ridiculousPackages].sort(() => Math.random() - 0.5);
+	const packagesToInstall = shuffled.slice(0, 5 + Math.floor(Math.random() * 4));
+
+	// Start the fake install
+	terminal.sendText('echo "\\n📦 Installing dependencies..."');
+	await sleep(400);
+
+	// Show packages being "fetched"
+	for (const pkg of packagesToInstall) {
+		const size = Math.floor(Math.random() * 500) + 50;
+		const actions = ['Fetching', 'Resolving', 'Downloading', 'Unpacking', 'Linking'];
+		const action = actions[Math.floor(Math.random() * actions.length)];
+		terminal.sendText(`echo "  ${action} ${pkg}@${Math.floor(Math.random() * 10)}.${Math.floor(Math.random() * 20)}.${Math.floor(Math.random() * 100)} (${size}KB)..."`);
+		await sleep(200 + Math.random() * 300);
+	}
+
+	// Random chance of a funny error or warning
+	const outcome = Math.random();
+	if (outcome < 0.3) {
+		// Peer dependency hell
+		terminal.sendText('echo "\\n⚠️  WARN: peer dependency conflict"');
+		terminal.sendText('echo "  └── is-even-ai-powered@2.0.0 requires is-odd@1.0.0"');
+		terminal.sendText('echo "  └── but is-odd@3.0.0 is already installed"');
+		terminal.sendText('echo "  └── which requires is-even@0.0.1"');
+		terminal.sendText('echo "  └── creating infinite recursion in node_modules"');
+	} else if (outcome < 0.5) {
+		// Absurd warning
+		terminal.sendText('echo "\\n⚠️  WARN: left-pad-premium is deprecated"');
+		terminal.sendText('echo "  └── Please upgrade to left-pad-enterprise-edition"');
+		terminal.sendText('echo "  └── Starting at only $49.99/month"');
+	} else if (outcome < 0.7) {
+		// Success with absurd stats
+		const totalPkgs = Math.floor(Math.random() * 2000) + 500;
+		const vulns = Math.floor(Math.random() * 50) + 10;
+		terminal.sendText(`echo "\\n✅ Added ${totalPkgs} packages in ${Math.floor(Math.random() * 30) + 5}s"`);
+		terminal.sendText(`echo "\\n🔍 Found ${vulns} vulnerabilities (${Math.floor(vulns * 0.3)} critical, ${Math.floor(vulns * 0.7)} high)"`);
+		terminal.sendText('echo "  Run \`npm audit fix --force --yolo\` to fix them (may break everything)"');
+	} else {
+		// Node modules size joke
+		const sizeGB = (Math.random() * 5 + 1).toFixed(1);
+		terminal.sendText(`echo "\\n📁 node_modules size: ${sizeGB}GB"`);
+		terminal.sendText('echo "  └── Larger than the moon landing source code"');
+		terminal.sendText('echo "  └── Consider buying more hard drive space"');
+	}
+
+	await sleep(1500);
+
+	// CRITICAL: Restore editor focus and cursor using offset (more reliable than Position)
+	try {
+		const document = await vscode.workspace.openTextDocument(documentUriBefore);
+		const editor = await vscode.window.showTextDocument(document, {
+			preview: false,
+			preserveFocus: false
+		});
+		// Convert offset back to position for current document state
+		const restorePosition = editor.document.positionAt(cursorOffset);
+		editor.selection = new vscode.Selection(restorePosition, restorePosition);
+		editor.revealRange(
+			new vscode.Range(restorePosition, restorePosition),
+			vscode.TextEditorRevealType.InCenterIfOutsideViewport
+		);
+		log(`Restored cursor to offset ${cursorOffset}`);
+	} catch (e) {
+		log(`Failed to restore editor after heavy install: ${e}`);
+	}
+
+	log('Heavy install complete');
+}
+
 // Shared function to check and trigger GUI actions - used by both manual and auto-type
 async function checkAndTriggerGuiAction(): Promise<void> {
 	keystrokesSinceLastAction++;
 	keystrokesSinceLastCopilot++; // Track for copilot cooldown
 	keystrokesSinceLastIntrusiveThought++; // Track for intrusive thought cooldown
+	keystrokesSinceLastHeavyInstall++; // Track for heavy install cooldown
 	if (keystrokesSinceLastAction >= nextActionThreshold) {
 		await performRandomGuiAction();
 		keystrokesSinceLastAction = 0;
@@ -665,6 +821,7 @@ let createdFiles: Set<string> = new Set();
 let autoTypeInterval: NodeJS.Timeout | undefined;
 let isAutoTypeMode = false;
 let autoTypeSpeed = 50; // milliseconds between characters
+let isAutoTyping = false; // Lock to prevent concurrent auto-type calls
 
 // Track if we've generated a problem for this session
 let hasGeneratedProblem = false;
@@ -1124,16 +1281,23 @@ async function autoTypeNextChar(): Promise<void> {
 		return;
 	}
 
-	if (!director || !director.getIsActive()) {
-		stopAutoType();
+	// CRITICAL: Prevent concurrent auto-type calls (setInterval doesn't wait for async)
+	if (isAutoTyping) {
 		return;
 	}
+	isAutoTyping = true;
 
-	const editor = vscode.window.activeTextEditor;
-	if (!editor) {
-		log('No active editor for auto-type');
-		return;
-	}
+	try {
+		if (!director || !director.getIsActive()) {
+			stopAutoType();
+			return;
+		}
+
+		const editor = vscode.window.activeTextEditor;
+		if (!editor) {
+			log('No active editor for auto-type');
+			return;
+		}
 
 	const nextChar = director.getNextChar();
 	const progress = director.getProgress();
@@ -1163,30 +1327,63 @@ async function autoTypeNextChar(): Promise<void> {
 		return;
 	}
 
-	if (nextChar === NEXT_FILE) {
-		log('Auto-type: Moving to next file...');
-		stopAutoType(); // Pause while switching files
-		await handleNextFile(editor);
-		// Resume after a short delay
-		setTimeout(() => {
-			if (director?.getIsActive()) {
-				startAutoType();
+		if (nextChar === NEXT_FILE) {
+			log('Auto-type: Moving to next file...');
+			stopAutoType(); // Pause while switching files
+			await handleNextFile(editor);
+			// Resume after a short delay
+			setTimeout(() => {
+				if (director?.getIsActive()) {
+					startAutoType();
+				}
+			}, 500);
+		} else if (nextChar === EXECUTE_SCENE) {
+			log('Auto-type: Scene complete, executing...');
+			stopAutoType();
+			await executeScene(editor);
+			// Auto-type will resume after the scene loads (handled in executeScene)
+		} else {
+			// Check if we need to switch files for diff mode writing
+			if (director.isInDiffMode()) {
+				const diffFilename = director.getDiffFilename();
+				const currentFilename = path.basename(editor.document.uri.fsPath);
+				if (diffFilename && diffFilename !== currentFilename) {
+					log(`Auto-type: Switching to diff file: ${diffFilename}`);
+					stopAutoType();
+					await switchToDiffFile(diffFilename);
+					setTimeout(() => {
+						if (director?.getIsActive()) {
+							startAutoType();
+						}
+					}, 300);
+					return;
+				}
 			}
-		}, 500);
-	} else if (nextChar === EXECUTE_SCENE) {
-		log('Auto-type: Scene complete, executing...');
-		stopAutoType();
-		await executeScene(editor);
-		// Auto-type will resume after the scene loads (handled in executeScene)
-	} else {
-		// Check if we need to switch files for diff mode writing
-		if (director.isInDiffMode()) {
-			const diffFilename = director.getDiffFilename();
-			const currentFilename = path.basename(editor.document.uri.fsPath);
-			if (diffFilename && diffFilename !== currentFilename) {
-				log(`Auto-type: Switching to diff file: ${diffFilename}`);
+		
+			// Insert at position tracked by Director (progress.current - 1 since getNextChar already advanced)
+			// This is more reliable than document.getText().length for multi-file projects
+			const progress = director.getProgress();
+			const insertOffset = progress.current > 0 ? progress.current - 1 : 0;
+			const insertPosition = editor.document.positionAt(insertOffset);
+
+			await editor.edit(editBuilder => {
+				editBuilder.insert(insertPosition, nextChar);
+			}, { undoStopBefore: false, undoStopAfter: false });
+
+			// Move cursor to after inserted char and scroll to keep visible
+			const newCursorPos = editor.document.positionAt(progress.current);
+			editor.selection = new vscode.Selection(newCursorPos, newCursorPos);
+			editor.revealRange(
+				new vscode.Range(newCursorPos, newCursorPos),
+				vscode.TextEditorRevealType.InCenterIfOutsideViewport
+			);
+
+			// If we just typed a newline and there's a pending file switch, do it now
+			if (nextChar === '\n' && pendingFileSwitch && director.isMultiFile()) {
+				pendingFileSwitch = false;
+				log('Executing pending file switch after newline');
 				stopAutoType();
-				await switchToDiffFile(diffFilename);
+				await handleRandomFileSwitch(editor);
 				setTimeout(() => {
 					if (director?.getIsActive()) {
 						startAutoType();
@@ -1194,35 +1391,12 @@ async function autoTypeNextChar(): Promise<void> {
 				}, 300);
 				return;
 			}
+
+			// Check if we should trigger a GUI action
+			await checkAndTriggerGuiAction();
 		}
-		
-		// Insert the character
-		await editor.edit(editBuilder => {
-			editBuilder.insert(editor.selection.active, nextChar);
-		}, { undoStopBefore: false, undoStopAfter: false });
-
-		// Scroll to keep cursor visible
-		editor.revealRange(
-			new vscode.Range(editor.selection.active, editor.selection.active),
-			vscode.TextEditorRevealType.InCenterIfOutsideViewport
-		);
-
-		// If we just typed a newline and there's a pending file switch, do it now
-		if (nextChar === '\n' && pendingFileSwitch && director.isMultiFile()) {
-			pendingFileSwitch = false;
-			log('Executing pending file switch after newline');
-			stopAutoType();
-			await handleRandomFileSwitch(editor);
-			setTimeout(() => {
-				if (director?.getIsActive()) {
-					startAutoType();
-				}
-			}, 300);
-			return;
-		}
-
-		// Check if we should trigger a GUI action
-		await checkAndTriggerGuiAction();
+	} finally {
+		isAutoTyping = false;
 	}
 }
 
