@@ -58,6 +58,8 @@ const guiActions = [
 	{ name: 'intrusive thought', command: 'custom:intrusiveThought' },
 	// Heavy install - opens terminal and simulates npm dependency hell
 	{ name: 'heavy install', command: 'custom:heavyInstall' },
+	// Micro-manager - fake Slack message from annoying coworker
+	{ name: 'micro manager', command: 'custom:microManager' },
 ];
 
 // Intrusive thoughts that "accidentally" get typed before being frantically deleted
@@ -121,6 +123,29 @@ const ridiculousPackages = [
 let keystrokesSinceLastHeavyInstall = 0;
 const MIN_KEYSTROKES_BETWEEN_HEAVY_INSTALL = 600; // Only allow heavy install every 600+ keystrokes
 
+// Micro-manager messages - annoying Slack/Teams interruptions
+const microManagerMessages = [
+	{ name: 'Michael from Product', message: 'Hey, quick question - can we make the logo bigger? 🙏' },
+	{ name: 'Sandra (HR)', message: 'Reminder: Please complete your timesheet by EOD 📋' },
+	{ name: 'Dave from Sales', message: 'Can you jump on a quick call? Just 5 mins I promise' },
+	{ name: 'Your Manager', message: 'Hey are you free for a quick sync?' },
+	{ name: 'Jennifer (PM)', message: 'Did you update the JIRA ticket? The sprint ends today' },
+	{ name: 'IT Support', message: 'Your password expires in 3 days. Click here to reset.' },
+	{ name: 'Kevin from QA', message: 'Found a bug. Can you look at it ASAP? Its blocking release' },
+	{ name: 'CEO', message: 'Love what the team is doing! Quick thought - what if we added AI? 🚀' },
+	{ name: 'Slack Bot', message: 'You have 47 unread messages in #general' },
+	{ name: 'Calendar', message: '⏰ Reminder: "Weekly Standup" starts in 5 minutes' },
+	{ name: 'Rachel (Design)', message: 'Can we use a different shade of blue? This one feels off' },
+	{ name: 'Your Manager', message: 'Lets circle back on this. Can you ping me when youre free?' },
+	{ name: 'Tom (Backend)', message: 'Hey did you push to main? Prod is down 🔥' },
+	{ name: 'HR Bot', message: '🎂 Wish Kevin a happy birthday in #celebrations!' },
+	{ name: 'Compliance', message: 'Please complete your annual security training by Friday' },
+];
+
+// Track keystrokes since last micro-manager
+let keystrokesSinceLastMicroManager = 0;
+const MIN_KEYSTROKES_BETWEEN_MICRO_MANAGER = 300; // Every 300+ keystrokes
+
 // Funny questions to ask Copilot during "coding"
 // Note: Set your Copilot model to a fast one (e.g., GPT-4o-mini) manually for quicker responses
 const copilotQuestions = [
@@ -172,6 +197,12 @@ async function performRandomGuiAction(): Promise<void> {
 		log('Forcing heavy install - cooldown passed');
 	}
 
+	// GUARANTEED: Force micro-manager if cooldown has passed
+	if (keystrokesSinceLastMicroManager >= MIN_KEYSTROKES_BETWEEN_MICRO_MANAGER) {
+		action = { name: 'micro manager', command: 'custom:microManager' };
+		log('Forcing micro-manager - cooldown passed');
+	}
+
 	// If copilot was selected but not enough keystrokes have passed, pick a different action
 	if (action.command === 'custom:copilotDistraction' && keystrokesSinceLastCopilot < MIN_KEYSTROKES_BETWEEN_COPILOT) {
 		log(`Skipping copilot distraction - only ${keystrokesSinceLastCopilot}/${MIN_KEYSTROKES_BETWEEN_COPILOT} keystrokes since last one`);
@@ -193,6 +224,18 @@ async function performRandomGuiAction(): Promise<void> {
 		log(`Skipping heavy install - only ${keystrokesSinceLastHeavyInstall}/${MIN_KEYSTROKES_BETWEEN_HEAVY_INSTALL} keystrokes since last one`);
 		// Pick a different action (exclude heavy install, intrusive thought, and copilot)
 		const otherActions = guiActions.filter(a =>
+			a.command !== 'custom:heavyInstall' &&
+			a.command !== 'custom:intrusiveThought' &&
+			a.command !== 'custom:copilotDistraction'
+		);
+		action = otherActions[Math.floor(Math.random() * otherActions.length)];
+	}
+
+	// If micro-manager was selected but not enough keystrokes have passed, pick a different action
+	if (action.command === 'custom:microManager' && keystrokesSinceLastMicroManager < MIN_KEYSTROKES_BETWEEN_MICRO_MANAGER) {
+		log(`Skipping micro-manager - only ${keystrokesSinceLastMicroManager}/${MIN_KEYSTROKES_BETWEEN_MICRO_MANAGER} keystrokes since last one`);
+		const otherActions = guiActions.filter(a =>
+			a.command !== 'custom:microManager' &&
 			a.command !== 'custom:heavyInstall' &&
 			a.command !== 'custom:intrusiveThought' &&
 			a.command !== 'custom:copilotDistraction'
@@ -263,6 +306,15 @@ async function performRandomGuiAction(): Promise<void> {
 		// Perform the heavy install - npm dependency hell simulator
 		await performHeavyInstall();
 		keystrokesSinceLastHeavyInstall = 0; // Reset the counter
+		isPerformingGuiAction = false;
+		if (keystrokeQueue.length > 0) {
+			processNextKeystroke();
+		}
+		return;
+	} else if (action.command === 'custom:microManager') {
+		// Perform the micro-manager - fake Slack popup
+		await performMicroManager();
+		keystrokesSinceLastMicroManager = 0; // Reset the counter
 		isPerformingGuiAction = false;
 		if (keystrokeQueue.length > 0) {
 			processNextKeystroke();
@@ -794,12 +846,114 @@ async function performHeavyInstall(): Promise<void> {
 	log('Heavy install complete');
 }
 
+// Perform the micro-manager - fake Slack/Teams popup
+async function performMicroManager(): Promise<void> {
+	log('Starting micro-manager popup...');
+
+	// Pick a random message
+	const msg = microManagerMessages[Math.floor(Math.random() * microManagerMessages.length)];
+
+	// Random avatar (pravatar.cc gives random faces)
+	const avatarId = Math.floor(Math.random() * 70) + 1;
+
+	// Random time in the last hour
+	const hour = Math.floor(Math.random() * 12) + 1;
+	const minute = Math.floor(Math.random() * 60).toString().padStart(2, '0');
+	const ampm = Math.random() > 0.5 ? 'PM' : 'AM';
+	const time = `${hour}:${minute} ${ampm}`;
+
+	// Create webview panel styled like Slack
+	const panel = vscode.window.createWebviewPanel(
+		'microManager',
+		`💬 ${msg.name}`,
+		vscode.ViewColumn.Beside,
+		{ enableScripts: false }
+	);
+
+	panel.webview.html = `
+<!DOCTYPE html>
+<html>
+<head>
+	<style>
+		body {
+			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+			padding: 16px;
+			background: #1a1d21;
+			color: #d1d2d3;
+			margin: 0;
+		}
+		.container {
+			display: flex;
+			gap: 12px;
+			align-items: flex-start;
+		}
+		.avatar {
+			width: 40px;
+			height: 40px;
+			border-radius: 8px;
+			background: #3f4248;
+		}
+		.content {
+			flex: 1;
+		}
+		.header {
+			display: flex;
+			align-items: baseline;
+			gap: 8px;
+			margin-bottom: 4px;
+		}
+		.name {
+			font-weight: 700;
+			color: #fff;
+		}
+		.time {
+			font-size: 12px;
+			color: #616061;
+		}
+		.message {
+			line-height: 1.46;
+			color: #d1d2d3;
+		}
+		.typing {
+			margin-top: 12px;
+			font-size: 12px;
+			color: #616061;
+			font-style: italic;
+		}
+	</style>
+</head>
+<body>
+	<div class="container">
+		<img class="avatar" src="https://i.pravatar.cc/40?img=${avatarId}" alt="avatar">
+		<div class="content">
+			<div class="header">
+				<span class="name">${msg.name}</span>
+				<span class="time">${time}</span>
+			</div>
+			<div class="message">${msg.message}</div>
+			<div class="typing">${msg.name.split(' ')[0]} is typing...</div>
+		</div>
+	</div>
+</body>
+</html>`;
+
+	log(`Micro-manager: "${msg.name}" says "${msg.message}"`);
+
+	// Auto-close after 4-6 seconds
+	const displayTime = 4000 + Math.random() * 2000;
+	await sleep(displayTime);
+	panel.dispose();
+
+	log('Micro-manager popup closed');
+}
+
 // Shared function to check and trigger GUI actions - used by both manual and auto-type
 async function checkAndTriggerGuiAction(): Promise<void> {
 	keystrokesSinceLastAction++;
 	keystrokesSinceLastCopilot++; // Track for copilot cooldown
 	keystrokesSinceLastIntrusiveThought++; // Track for intrusive thought cooldown
 	keystrokesSinceLastHeavyInstall++; // Track for heavy install cooldown
+	keystrokesSinceLastMicroManager++; // Track for micro-manager cooldown
 	if (keystrokesSinceLastAction >= nextActionThreshold) {
 		await performRandomGuiAction();
 		keystrokesSinceLastAction = 0;
@@ -1763,6 +1917,31 @@ async function handleRandomFileSwitch(currentEditor: vscode.TextEditor): Promise
 	log(`Now on file ${progress.fileIndex + 1}/${progress.totalFiles}: ${newFile.filename} at char ${progress.current}`);
 }
 
+// Run a command in terminal and wait for it to complete, returning the exit code
+async function runCommandAndWaitForExit(terminal: vscode.Terminal, command: string): Promise<number | undefined> {
+	return new Promise((resolve) => {
+		// Set up listener for shell execution end (VS Code 1.93+)
+		const disposable = vscode.window.onDidEndTerminalShellExecution((event) => {
+			// Check if this is our terminal
+			if (event.terminal === terminal) {
+				log(`Shell execution ended with exit code: ${event.exitCode}`);
+				disposable.dispose();
+				resolve(event.exitCode);
+			}
+		});
+
+		// Send the command
+		terminal.sendText(command);
+
+		// Fallback timeout in case shell integration isn't available (60 seconds max)
+		setTimeout(() => {
+			log('Timeout waiting for shell execution - shell integration may not be available');
+			disposable.dispose();
+			resolve(undefined); // undefined means we couldn't determine the exit code
+		}, 60000);
+	});
+}
+
 async function executeScene(editor: vscode.TextEditor): Promise<void> {
 	if (!director) {
 		log('ERROR: Director not available in executeScene');
@@ -1782,8 +1961,8 @@ async function executeScene(editor: vscode.TextEditor): Promise<void> {
 		terminal = vscode.window.createTerminal('Performative');
 		log('Created new terminal');
 	}
-	// Show terminal but preserve focus on editor to prevent keystrokes leaking in
-	terminal.show(true);
+	// Show terminal and take focus so user can interact with the program
+	terminal.show(false);
 
 	// Determine what to run
 	let runCommand: string;
@@ -1804,7 +1983,23 @@ async function executeScene(editor: vscode.TextEditor): Promise<void> {
 		log(`Running single file: ${runCommand}`);
 	}
 	
-	terminal.sendText(runCommand);
+	// Wait for the command to complete and check exit code
+	log('Running command and waiting for completion...');
+	const exitCode = await runCommandAndWaitForExit(terminal, runCommand);
+	log(`Command completed with exit code: ${exitCode}`);
+
+	// Only generate README if the command succeeded (exit code 0)
+	// Also generate if exitCode is undefined (shell integration not available - assume success)
+	if (exitCode === 0 || exitCode === undefined) {
+		if (exitCode === undefined) {
+			log('Shell integration not available, assuming success...');
+		}
+		log('Tests passed! Now generating README.md...');
+		await generateAndTypeReadme();
+	} else {
+		log(`Command failed with exit code ${exitCode}, skipping README generation`);
+		vscode.window.showWarningMessage(`⚠️ Program exited with code ${exitCode}. README not generated.`);
+	}
 
 	// Wait for the code to execute
 	await sleep(3000);
@@ -1887,6 +2082,209 @@ async function executeScene(editor: vscode.TextEditor): Promise<void> {
 	terminal.show(false); // false = take focus
 
 	vscode.window.showInformationMessage('🎉 Scene complete! Code executed in terminal. Use Cmd+Shift+G to generate a new project.');
+}
+
+// Humorous README generation phrases
+const readmeQuips = [
+	"Crafted with caffeine and questionable life choices",
+	"No AI was harmed in the making of this code (okay, maybe a little)",
+	"Built during a moment of clarity between meetings",
+	"100% organic, free-range, artisanal Python",
+	"Written faster than it took you to read this sentence",
+	"May contain traces of Stack Overflow",
+	"Side effects may include: working code",
+	"Powered by hopes, dreams, and print statements",
+	"Certified bug-free* (*certification pending)",
+	"Made with 💻 and a suspicious amount of confidence",
+];
+
+const installJokes = [
+	"pip install prayer",
+	"pip install --upgrade patience",
+	"pip install coffee>=9000",
+	"pip install good-vibes",
+	"pip install stackoverflow-dependency",
+];
+
+const usageJokes = [
+	"Cross your fingers",
+	"Whisper encouraging words to your terminal",
+	"Light a candle for good luck",
+	"Pet a rubber duck",
+	"Sacrifice a semicolon to the code gods",
+];
+
+const disclaimers = [
+	"This code worked on my machine. Your machine has trust issues.",
+	"Any resemblance to production-ready code is purely coincidental.",
+	"If this code breaks, you didn't get it from me.",
+	"Works 60% of the time, every time.",
+	"Caution: May spontaneously refactor itself.",
+	"Handle with care. Or don't. I'm a README, not a cop.",
+];
+
+async function generateAndTypeReadme(): Promise<void> {
+	if (!director || !workingDirectory) {
+		log('Cannot generate README: director or workingDirectory not available');
+		return;
+	}
+
+	const problem = director.getCurrentProblem();
+	if (!problem) {
+		log('Cannot generate README: no current problem');
+		return;
+	}
+
+	// Get problem details
+	const taskId = problem.task_id;
+	const description = 'description' in problem ? problem.description : problem.entry_point;
+	const isMulti = director.isMultiFile();
+	const files = isMulti ? (problem as { files: Array<{filename: string}> }).files.map(f => f.filename) : ['solution.py'];
+	const entryFile = isMulti ? director.getEntryFile() : 'solution.py';
+
+	// Pick random humorous elements
+	const quip = readmeQuips[Math.floor(Math.random() * readmeQuips.length)];
+	const installJoke = installJokes[Math.floor(Math.random() * installJokes.length)];
+	const usageJoke = usageJokes[Math.floor(Math.random() * usageJokes.length)];
+	const disclaimer = disclaimers[Math.floor(Math.random() * disclaimers.length)];
+
+	// Generate the project name from task_id
+	const projectName = taskId.replace('Generated/', '').replace(/[-_]/g, ' ').split(' ')
+		.map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+
+	// Build the README content
+	const readmeContent = `# ${projectName} 🚀
+
+> ${quip}
+
+## 📖 Description
+
+${description}
+
+*${disclaimer}*
+
+## 🗂️ Project Structure
+
+\`\`\`
+${files.map(f => `├── ${f}`).join('\n')}
+└── README.md  ← You are here! 👋
+\`\`\`
+
+## 🛠️ Installation
+
+\`\`\`bash
+# First, ensure you have Python 3 installed
+python3 --version
+
+# Then install the super important dependencies
+${installJoke}
+\`\`\`
+
+## 🏃 Running the Project
+
+\`\`\`bash
+# Navigate to the project directory
+cd ${workingDirectory}
+
+# Run the main entry point
+python3 ${entryFile}
+
+# ${usageJoke}
+\`\`\`
+
+## ✅ Testing
+
+Tests? We don't need tests where we're going! 
+
+Just kidding. The code has been thoroughly tested by:
+- Running it once ✓
+- Seeing "Success" in the terminal ✓
+- Nodding approvingly ✓
+
+## 🤝 Contributing
+
+1. Fork it
+2. Break it
+3. Fix it
+4. Pretend it was always like that
+
+## 📜 License
+
+This project is licensed under the "Works On My Machine" Public License.
+
+---
+
+*Generated with ❤️ by Performative Developer*
+
+*Task ID: \`${taskId}\`*
+`;
+
+	// Create the README file
+	const readmePath = path.join(workingDirectory, 'README.md');
+	const readmeUri = vscode.Uri.file(readmePath);
+	
+	// Close all open editor tabs first (clean slate for README)
+	await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+	log('Closed all editor tabs');
+	
+	// Create an empty file first
+	await vscode.workspace.fs.writeFile(readmeUri, new Uint8Array());
+	
+	// Open the file in the editor
+	const document = await vscode.workspace.openTextDocument(readmeUri);
+	const readmeEditor = await vscode.window.showTextDocument(document, {
+		viewColumn: vscode.ViewColumn.One,
+		preview: false
+	});
+
+	log(`Created README.md, now typing it out character by character...`);
+
+	// Type out the README character by character (faster than code typing)
+	for (const char of readmeContent) {
+		await readmeEditor.edit(editBuilder => {
+			const position = readmeEditor.document.positionAt(readmeEditor.document.getText().length);
+			editBuilder.insert(position, char);
+		});
+		
+		// Move cursor to end after each character
+		const endPos = readmeEditor.document.positionAt(readmeEditor.document.getText().length);
+		readmeEditor.selection = new vscode.Selection(endPos, endPos);
+		readmeEditor.revealRange(new vscode.Range(endPos, endPos));
+		
+		// Faster typing for README (15ms per char instead of 30-50)
+		await sleep(15);
+	}
+
+	// Save the README
+	await readmeEditor.document.save();
+	log('README.md typed and saved!');
+
+	// Scroll the README editor to the top
+	const topPosition = new vscode.Position(0, 0);
+	readmeEditor.selection = new vscode.Selection(topPosition, topPosition);
+	readmeEditor.revealRange(new vscode.Range(topPosition, topPosition), vscode.TextEditorRevealType.AtTop);
+	log('Scrolled README editor to top');
+
+	// Close the README.md file
+	await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+	log('Closed README.md file');
+
+	// Close the terminal
+	if (vscode.window.activeTerminal) {
+		vscode.window.activeTerminal.dispose();
+		log('Closed terminal');
+	}
+
+	// Wait a moment, then open the markdown preview
+	await sleep(500);
+	
+	// Open the markdown preview (will be the only thing visible now)
+	try {
+		await vscode.commands.executeCommand('markdown.showPreview', readmeUri);
+		log('Opened markdown preview');
+	} catch (e) {
+		log(`Could not open markdown preview: ${e}`);
+	}
 }
 
 export async function deactivate() {
