@@ -1,0 +1,21 @@
+[{
+    "task_id": "Sample/0",
+    "prompt": "def hello_world():\n    \"\"\"\n    Return the string 'Hello World!'\n    \"\"\"\n",
+    "entry_point": "hello_world",
+    "canonical_solution": "    return 'Hello World!'\n",
+    "test": "\ndef check(candidate):\n    assert candidate() == 'Hello World!'\n"
+},
+{
+    "task_id": "Sample/1",
+    "prompt": "def add(a: int, b: int) -> int:\n    \"\"\"\n    Return the sum of a and b.\n    \"\"\"\n",
+    "entry_point": "add",
+    "canonical_solution": "    return a + b\n",
+    "test": "\ndef check(candidate):\n    assert candidate(1, 2) == 3\n    assert candidate(10, 20) == 30\n    assert candidate(-5, 5) == 0\n"
+},
+{
+    "task_id": "Sample/2",
+    "prompt": "def is_even(n: int) -> bool:\n    \"\"\"\n    Return True if n is even, False otherwise.\n    \"\"\"\n",
+    "entry_point": "is_even",
+    "canonical_solution": "    return n % 2 == 0\n",
+    "test": "\ndef check(candidate):\n    assert candidate(2) is True\n    assert candidate(3) is False\n    assert candidate(0) is True\n"
+}]
