@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { Director, EXECUTE_SCENE, NEXT_FILE } from './director';
+import { Director, EXECUTE_SCENE, NEXT_FILE, DELETE_LINE } from './director';
 import { 
 	generateMultiFileProblem,
 	extendProject,
@@ -633,7 +633,7 @@ async function askCopilotForExtension(): Promise<string | undefined> {
 	}
 }
 
-// Generate extended project using AI and start extension plan
+// Generate extended project using AI and start diff mode
 async function generateExtendedProject(suggestion: string): Promise<boolean> {
 	if (!director) {
 		log('ERROR: Director not available for extension');
@@ -666,9 +666,8 @@ async function generateExtendedProject(suggestion: string): Promise<boolean> {
 		log(`Generated extended project: ${extendedProject.description}`);
 		log(`Files: ${extendedProject.files.map(f => f.filename).join(', ')}`);
 		
-		// Prepare extension plan for multi-file typing
-		director.startExtensionPlan(extendedProject);
-		await applyExtensionDeletes();
+		// Start diff mode in director
+		director.startDiffMode(extendedProject);
 		
 		updateStatusBar(true);
 		vscode.window.showInformationMessage(`🔄 Extending: ${extendedProject.description}`);
@@ -679,25 +678,6 @@ async function generateExtendedProject(suggestion: string): Promise<boolean> {
 		updateStatusBar(false);
 		vscode.window.showErrorMessage(`Failed to extend project: ${error}`);
 		return false;
-	}
-}
-
-async function applyExtensionDeletes(): Promise<void> {
-	if (!director || !workingDirectory) {
-		return;
-	}
-
-	const deletes = director.consumePendingDeletes();
-	for (const filename of deletes) {
-		const filePath = path.join(workingDirectory, filename);
-		const fileUri = vscode.Uri.file(filePath);
-		try {
-			await vscode.workspace.fs.delete(fileUri, { useTrash: false });
-			createdFiles.delete(filename);
-			log(`Deleted file for extension: ${filename}`);
-		} catch (error) {
-			log(`Failed to delete file for extension ${filename}: ${error}`);
-		}
 	}
 }
 
@@ -1476,6 +1456,31 @@ async function autoTypeNextChar(): Promise<void> {
 	const nextChar = director.getNextChar();
 	const progress = director.getProgress();
 
+	// Handle diff mode DELETE_LINE
+	if (nextChar === DELETE_LINE) {
+		log('Auto-type diff mode: Deleting line');
+		const lineNumber = editor.selection.active.line;
+		const line = editor.document.lineAt(lineNumber);
+		const range = line.rangeIncludingLineBreak;
+		await editor.edit(editBuilder => {
+			editBuilder.delete(range);
+		}, { undoStopBefore: false, undoStopAfter: false });
+		
+		// Check if we need to switch files
+		const diffFilename = director.getDiffFilename();
+		const currentFilename = path.basename(editor.document.uri.fsPath);
+		if (diffFilename && diffFilename !== currentFilename) {
+			stopAutoType();
+			await switchToDiffFile(diffFilename);
+			setTimeout(() => {
+				if (director?.getIsActive()) {
+					startAutoType();
+				}
+			}, 300);
+		}
+		return;
+	}
+
 		if (nextChar === NEXT_FILE) {
 			log('Auto-type: Moving to next file...');
 			stopAutoType(); // Pause while switching files
@@ -1492,6 +1497,23 @@ async function autoTypeNextChar(): Promise<void> {
 			await executeScene(editor);
 			// Auto-type will resume after the scene loads (handled in executeScene)
 		} else {
+			// Check if we need to switch files for diff mode writing
+			if (director.isInDiffMode()) {
+				const diffFilename = director.getDiffFilename();
+				const currentFilename = path.basename(editor.document.uri.fsPath);
+				if (diffFilename && diffFilename !== currentFilename) {
+					log(`Auto-type: Switching to diff file: ${diffFilename}`);
+					stopAutoType();
+					await switchToDiffFile(diffFilename);
+					setTimeout(() => {
+						if (director?.getIsActive()) {
+							startAutoType();
+						}
+					}, 300);
+					return;
+				}
+			}
+		
 			// Insert at position tracked by Director (progress.current - 1 since getNextChar already advanced)
 			// This is more reliable than document.getText().length for multi-file projects
 			const progress = director.getProgress();
@@ -1683,6 +1705,27 @@ function registerTypeCommand(context: vscode.ExtensionContext): void {
 			const nextChar = director!.getNextChar();
 			const progress = director!.getProgress();
 			
+			// Handle diff mode operations
+			if (nextChar === DELETE_LINE) {
+				log('Diff mode: Deleting line');
+				// Delete the current line
+				const lineNumber = currentEditor.selection.active.line;
+				const line = currentEditor.document.lineAt(lineNumber);
+				const range = line.rangeIncludingLineBreak;
+				await currentEditor.edit(editBuilder => {
+					editBuilder.delete(range);
+				}, { undoStopBefore: false, undoStopAfter: false });
+				
+				// Check if we need to switch files for next operation
+				const diffFilename = director!.getDiffFilename();
+				const currentFilename = path.basename(currentEditor.document.uri.fsPath);
+				if (diffFilename && diffFilename !== currentFilename) {
+					log(`Switching to diff file: ${diffFilename}`);
+					await switchToDiffFile(diffFilename);
+				}
+				return;
+			}
+			
 			log(`Next char: "${nextChar === '\n' ? '\\n' : nextChar}" (file ${progress.fileIndex + 1}/${progress.totalFiles}, char ${progress.current}/${progress.total})`);
 
 			if (nextChar === NEXT_FILE) {
@@ -1692,6 +1735,24 @@ function registerTypeCommand(context: vscode.ExtensionContext): void {
 				log('Script complete! Executing scene...');
 				await executeScene(currentEditor);
 			} else {
+				// Check if we need to switch files for diff mode
+				if (director!.isInDiffMode()) {
+					const diffFilename = director!.getDiffFilename();
+					const currentFilename = path.basename(currentEditor.document.uri.fsPath);
+					if (diffFilename && diffFilename !== currentFilename) {
+						log(`Switching to diff file: ${diffFilename}`);
+						await switchToDiffFile(diffFilename);
+						// Re-get editor after switch
+						const newEditor = vscode.window.activeTextEditor;
+						if (newEditor) {
+							await newEditor.edit(editBuilder => {
+								editBuilder.insert(newEditor.selection.active, nextChar);
+							}, { undoStopBefore: false, undoStopAfter: false });
+						}
+						return;
+					}
+				}
+				
 				// Insert the scripted character instead of user's keystroke
 				await currentEditor.edit(editBuilder => {
 					editBuilder.insert(currentEditor.selection.active, nextChar);
@@ -1722,6 +1783,43 @@ function registerTypeCommand(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push(typeCommandDisposable);
 	log('Type command registered successfully');
+}
+
+// Helper to switch to a diff file
+async function switchToDiffFile(filename: string): Promise<void> {
+	if (!workingDirectory) {
+		log('No working directory for diff file switch');
+		return;
+	}
+	
+	const filePath = path.join(workingDirectory, filename);
+	const fileUri = vscode.Uri.file(filePath);
+	
+	// Create file if it doesn't exist
+	if (!createdFiles.has(filename)) {
+		try {
+			await vscode.workspace.fs.writeFile(fileUri, new Uint8Array());
+			createdFiles.add(filename);
+		} catch (e) {
+			log(`Could not create file ${filename}: ${e}`);
+		}
+	}
+	
+	try {
+		const document = await vscode.workspace.openTextDocument(fileUri);
+		const editor = await vscode.window.showTextDocument(document, {
+			viewColumn: vscode.ViewColumn.One,
+			preview: false
+		});
+		
+		// Position cursor at start of file
+		const startPos = new vscode.Position(0, 0);
+		editor.selection = new vscode.Selection(startPos, startPos);
+		
+		log(`Switched to diff file: ${filename}`);
+	} catch (e) {
+		log(`Could not switch to diff file ${filename}: ${e}`);
+	}
 }
 
 function unregisterTypeCommand(): void {
@@ -1756,18 +1854,6 @@ async function handleNextFile(currentEditor: vscode.TextEditor): Promise<void> {
 	const filePath = path.join(workingDirectory, nextFile.filename);
 	const fileUri = vscode.Uri.file(filePath);
 
-	if (director?.shouldRewriteFile(nextFile.filename)) {
-		try {
-			await vscode.workspace.fs.delete(fileUri, { useTrash: false });
-			createdFiles.delete(nextFile.filename);
-			log(`Rewriting file for extension: ${nextFile.filename}`);
-		} catch (error) {
-			log(`Failed to delete file for rewrite ${nextFile.filename}: ${error}`);
-		} finally {
-			director?.clearRewriteFlag(nextFile.filename);
-		}
-	}
-
 	if (!createdFiles.has(nextFile.filename)) {
 		await vscode.workspace.fs.writeFile(fileUri, new Uint8Array());
 		createdFiles.add(nextFile.filename);
@@ -1780,12 +1866,20 @@ async function handleNextFile(currentEditor: vscode.TextEditor): Promise<void> {
 		preview: false
 	});
 
-	// Position cursor using director's tracked position
-	const progress = director.getProgress();
-	const cursorPos = editor.document.positionAt(progress.current);
-	editor.selection = new vscode.Selection(cursorPos, cursorPos);
-	editor.revealRange(new vscode.Range(cursorPos, cursorPos));
+	// If in diff mode, always set cursor to start of file
+	if (director.isInDiffMode()) {
+		const startPos = new vscode.Position(0, 0);
+		editor.selection = new vscode.Selection(startPos, startPos);
+		editor.revealRange(new vscode.Range(startPos, startPos));
+	} else {
+		// Position cursor using director's tracked position
+		const progress = director.getProgress();
+		const cursorPos = editor.document.positionAt(progress.current);
+		editor.selection = new vscode.Selection(cursorPos, cursorPos);
+		editor.revealRange(new vscode.Range(cursorPos, cursorPos));
+	}
 
+	const progress = director.getProgress();
 	vscode.window.showInformationMessage(`📄 File ${progress.fileIndex + 1}/${progress.totalFiles}: ${nextFile.filename}`);
 }
 
@@ -1810,18 +1904,6 @@ async function handleRandomFileSwitch(currentEditor: vscode.TextEditor): Promise
 	const filePath = path.join(workingDirectory, newFile.filename);
 	const fileUri = vscode.Uri.file(filePath);
 
-	if (director?.shouldRewriteFile(newFile.filename)) {
-		try {
-			await vscode.workspace.fs.delete(fileUri, { useTrash: false });
-			createdFiles.delete(newFile.filename);
-			log(`Rewriting file for extension: ${newFile.filename}`);
-		} catch (error) {
-			log(`Failed to delete file for rewrite ${newFile.filename}: ${error}`);
-		} finally {
-			director?.clearRewriteFlag(newFile.filename);
-		}
-	}
-
 	if (!createdFiles.has(newFile.filename)) {
 		await vscode.workspace.fs.writeFile(fileUri, new Uint8Array());
 		createdFiles.add(newFile.filename);
@@ -1834,12 +1916,20 @@ async function handleRandomFileSwitch(currentEditor: vscode.TextEditor): Promise
 		preview: false
 	});
 
-	// Position cursor using director's tracked position for this file
-	const progress = director.getProgress();
-	const cursorPos = editor.document.positionAt(progress.current);
-	editor.selection = new vscode.Selection(cursorPos, cursorPos);
-	editor.revealRange(new vscode.Range(cursorPos, cursorPos));
+	// If in diff mode, always set cursor to start of file
+	if (director.isInDiffMode()) {
+		const startPos = new vscode.Position(0, 0);
+		editor.selection = new vscode.Selection(startPos, startPos);
+		editor.revealRange(new vscode.Range(startPos, startPos));
+	} else {
+		// Position cursor using director's tracked position for this file
+		const progress = director.getProgress();
+		const cursorPos = editor.document.positionAt(progress.current);
+		editor.selection = new vscode.Selection(cursorPos, cursorPos);
+		editor.revealRange(new vscode.Range(cursorPos, cursorPos));
+	}
 
+	const progress = director.getProgress();
 	log(`Now on file ${progress.fileIndex + 1}/${progress.totalFiles}: ${newFile.filename} at char ${progress.current}`);
 }
 
@@ -1959,24 +2049,25 @@ async function executeScene(editor: vscode.TextEditor): Promise<void> {
 			isGeneratingExtension = false;
 			isExecutingScene = false;
 			
-				// Focus back on the first file that needs modification
-				const nextFile = director.getCurrentFile();
-				if (nextFile && workingDirectory) {
-					const filePath = path.join(workingDirectory, nextFile.filename);
-					const fileUri = vscode.Uri.file(filePath);
-					try {
-						const document = await vscode.workspace.openTextDocument(fileUri);
-						const newEditor = await vscode.window.showTextDocument(document, {
-							viewColumn: vscode.ViewColumn.One,
-							preview: false
-						});
-						const startPos = new vscode.Position(0, 0);
-						newEditor.selection = new vscode.Selection(startPos, startPos);
-						log(`Opened ${nextFile.filename} for extension typing`);
-					} catch (e) {
-						log(`Could not open extension file: ${e}`);
-					}
+			// Focus back on the first file that needs modification
+			const diffFilename = director.getDiffFilename();
+			if (diffFilename && workingDirectory) {
+				const filePath = path.join(workingDirectory, diffFilename);
+				const fileUri = vscode.Uri.file(filePath);
+				try {
+					const document = await vscode.workspace.openTextDocument(fileUri);
+					const newEditor = await vscode.window.showTextDocument(document, {
+						viewColumn: vscode.ViewColumn.One,
+						preview: false
+					});
+					// Move cursor to beginning of file for deletion
+					const startPos = new vscode.Position(0, 0);
+					newEditor.selection = new vscode.Selection(startPos, startPos);
+					log(`Opened ${diffFilename} for diff-based editing`);
+				} catch (e) {
+					log(`Could not open diff file: ${e}`);
 				}
+			}
 			
 			// Resume auto-typing if it was active
 			if (wasAutoTyping) {
