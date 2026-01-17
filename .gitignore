@@ -5,3 +5,4 @@ node_modules
 *.vsix
 CLAUDE.md
 .claude/
+gen
