@@ -40,21 +40,69 @@ function getRandomThreshold(): number {
 }
 
 const guiActions = [
-	{ name: 'toggle sidebar', command: 'workbench.action.toggleSidebarVisibility' },
+	// { name: 'toggle sidebar', command: 'workbench.action.toggleSidebarVisibility' },
 	{ name: 'toggle terminal', command: 'custom:toggleTerminal' },
 	{ name: 'switch file', command: 'custom:switchFile' },
 	// Layout actions - need special handling to preserve cursor state
 	{ name: 'single layout', command: 'custom:singleLayout' },
 	{ name: 'two columns', command: 'custom:twoColumns' },
+	// Copilot distraction - opens copilot chat with a random funny question
+	{ name: 'copilot distraction', command: 'custom:copilotDistraction' },
+];
+
+// Funny questions to ask Copilot during "coding"
+// Note: Set your Copilot model to a fast one (e.g., GPT-4o-mini) manually for quicker responses
+const copilotQuestions = [
+	"tell me the recipe to make a tiramisu flavoured iced coffee",
+	"what's the most efficient way to procrastinate while looking productive?",
+	"explain quantum computing but make it sound like a recipe for lasagna",
+	"if a rubber duck could debug code, what would its linkedin profile look like?",
+	"write me a haiku about null pointer exceptions",
+	"what's the best excuse for when your code works but you don't know why?",
+	"explain recursion using only pizza toppings as examples",
+	"if stackoverflow went down for a day, how would civilization collapse?",
+	"write a motivational speech for a semicolon that feels unappreciated",
+	"what would gordon ramsay say about my spaghetti code?",
+	"explain the difference between git merge and git rebase using a soap opera plot",
+	"if bugs were pokemon, what types would they be?",
+	"write a breakup letter to Internet Explorer",
+	"what's the optimal coffee to code ratio for maximum productivity?",
+	"explain machine learning to a medieval peasant",
+	"if my code were a horror movie, what would the tagline be?",
+	"write a yelp review for the void that null points to",
+	"what would a therapist say to an infinite loop?",
+	"explain blockchain but make it sound like a cooking competition",
+	"if tabs vs spaces were a civil war, who would win and why?",
+	"write a dating profile for a lonely API endpoint",
+	"what's the best way to name variables when you've completely given up?",
+	"explain docker containers using only ikea furniture assembly instructions",
+	"if my git history were a novel, what genre would it be?",
+	"write a formal apology letter from Monday to all developers",
 ];
 
 // Track if terminal panel is visible
 let isTerminalVisible = false;
 
+// Track if a copilot distraction is currently in progress
+let isCopilotDistractionInProgress = false;
+
+// Track keystrokes since last copilot distraction (to make it rare)
+let keystrokesSinceLastCopilot = 0;
+const MIN_KEYSTROKES_BETWEEN_COPILOT = 300; // Only allow copilot every 300+ keystrokes
+
 async function performRandomGuiAction(): Promise<void> {
 	isPerformingGuiAction = true;
 
-	const action = guiActions[Math.floor(Math.random() * guiActions.length)];
+	let action = guiActions[Math.floor(Math.random() * guiActions.length)];
+	
+	// If copilot was selected but not enough keystrokes have passed, pick a different action
+	if (action.command === 'custom:copilotDistraction' && keystrokesSinceLastCopilot < MIN_KEYSTROKES_BETWEEN_COPILOT) {
+		log(`Skipping copilot distraction - only ${keystrokesSinceLastCopilot}/${MIN_KEYSTROKES_BETWEEN_COPILOT} keystrokes since last one`);
+		// Pick a different action (exclude copilot)
+		const otherActions = guiActions.filter(a => a.command !== 'custom:copilotDistraction');
+		action = otherActions[Math.floor(Math.random() * otherActions.length)];
+	}
+	
 	log(`Performing GUI action: ${action.name}`);
 
 	// Capture current editor state BEFORE any action
@@ -95,6 +143,16 @@ async function performRandomGuiAction(): Promise<void> {
 			await vscode.commands.executeCommand('workbench.action.moveEditorToNextGroup');
 			log(`Moved to new group`);
 		}
+	} else if (action.command === 'custom:copilotDistraction') {
+		// Perform the copilot distraction - this handles its own editor restoration
+		await performCopilotDistraction();
+		keystrokesSinceLastCopilot = 0; // Reset the counter
+		// Skip the normal editor restoration below since copilot distraction handles it
+		isPerformingGuiAction = false;
+		if (keystrokeQueue.length > 0) {
+			processNextKeystroke();
+		}
+		return;
 	} else {
 		await vscode.commands.executeCommand(action.command);
 	}
@@ -132,9 +190,158 @@ async function performRandomGuiAction(): Promise<void> {
 	}
 }
 
+// Helper to type text character by character with delays (for visual effect)
+async function typeTextSlowly(text: string, delayMs: number = 30): Promise<void> {
+	for (const char of text) {
+		// Type each character by simulating the 'type' command directly to the active input
+		await vscode.commands.executeCommand('default:type', { text: char });
+		await sleep(delayMs);
+	}
+}
+
+// Sleep helper
+function sleep(ms: number): Promise<void> {
+	return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Perform the copilot distraction - opens chat, types a question, waits for response
+async function performCopilotDistraction(): Promise<void> {
+	// Skip if a copilot distraction is already in progress
+	if (isCopilotDistractionInProgress) {
+		log('Copilot distraction already in progress - skipping');
+		return;
+	}
+	
+	isCopilotDistractionInProgress = true;
+	log('Starting Copilot distraction...');
+	
+	// Capture current editor state BEFORE opening copilot
+	const editorBefore = vscode.window.activeTextEditor;
+	const documentUriBefore = editorBefore?.document.uri;
+	const cursorPositionBefore = editorBefore?.selection.active;
+	
+	// Pick a random question
+	const question = copilotQuestions[Math.floor(Math.random() * copilotQuestions.length)];
+	log(`Copilot question: "${question}"`);
+	
+	try {
+		// Open GitHub Copilot Chat panel
+		// Try the inline chat first (appears as a floating window in the editor)
+		try {
+			await vscode.commands.executeCommand('workbench.action.chat.open');
+			log('Opened Copilot Chat panel');
+		} catch (e) {
+			// Fallback to other copilot commands if available
+			try {
+				await vscode.commands.executeCommand('github.copilot.interactiveEditor.explain');
+			} catch {
+				log('Could not open Copilot Chat - extension may not be installed');
+				return;
+			}
+		}
+		
+		// Wait a moment for the chat to open and for any stray keystrokes to settle
+		await sleep(600);
+		
+		// Clear any gibberish that may have been typed by user keystrokes
+		// Select all text in the input and delete it
+		await vscode.commands.executeCommand('editor.action.selectAll');
+		await sleep(50);
+		await vscode.commands.executeCommand('deleteLeft');
+		await sleep(100);
+		
+		// Type the question character by character for visual effect
+		await typeTextSlowly(question, 25);
+		
+		// Small pause after typing, then submit
+		await sleep(300);
+		
+		// Submit the question using the chat submit command (Enter just creates newline)
+		try {
+			await vscode.commands.executeCommand('workbench.action.chat.submit');
+			log('Submitted question to Copilot via chat.submit');
+		} catch {
+			// Fallback: try using acceptInput or other methods
+			try {
+				await vscode.commands.executeCommand('workbench.action.chat.acceptInput');
+				log('Submitted question to Copilot via acceptInput');
+			} catch {
+				log('Could not submit chat message');
+			}
+		}
+		
+		// Wait for the AI to generate a response
+		// Conservative wait time - assume response takes a while
+		const responseWaitTime = 12000 + Math.random() * 5000; // 12-17 seconds
+		log(`Waiting ${Math.round(responseWaitTime)}ms for Copilot response...`);
+		await sleep(responseWaitTime);
+		
+		// "Read" the response - stay on the chat for a bit longer
+		const readingTime = 3000 + Math.random() * 2000; // 3-5 seconds of "reading"
+		log(`Reading response for ${Math.round(readingTime)}ms...`);
+		await sleep(readingTime);
+		
+		// First restore editor focus and cursor position (chat stays open)
+		log('Returning focus to editor (chat still visible)...');
+		
+		if (documentUriBefore && cursorPositionBefore) {
+			try {
+				const document = await vscode.workspace.openTextDocument(documentUriBefore);
+				const editor = await vscode.window.showTextDocument(document, {
+					preview: false,
+					preserveFocus: false
+				});
+				editor.selection = new vscode.Selection(cursorPositionBefore, cursorPositionBefore);
+				editor.revealRange(
+					new vscode.Range(cursorPositionBefore, cursorPositionBefore),
+					vscode.TextEditorRevealType.InCenterIfOutsideViewport
+				);
+				log('Restored editor focus after Copilot distraction');
+			} catch (e) {
+				log(`Failed to restore editor: ${e}`);
+			}
+		}
+		
+		// Wait 3 seconds before closing the chat window
+		log('Waiting 3 seconds before closing chat...');
+		await sleep(3000);
+		
+		// Now close the copilot chat
+		log('Closing Copilot Chat...');
+		
+		// Close the chat view - try multiple methods to ensure it's closed
+		try {
+			await vscode.commands.executeCommand('workbench.action.chat.close');
+		} catch {
+			// Ignore
+		}
+		try {
+			await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
+		} catch {
+			// Ignore
+		}
+		
+	} catch (error) {
+		log(`Copilot distraction error: ${error}`);
+		// Try to restore editor even on error
+		if (documentUriBefore && cursorPositionBefore) {
+			try {
+				const document = await vscode.workspace.openTextDocument(documentUriBefore);
+				await vscode.window.showTextDocument(document);
+			} catch {
+				// Ignore restore errors
+			}
+		}
+	}
+	
+	isCopilotDistractionInProgress = false;
+	log('Copilot distraction complete');
+}
+
 // Shared function to check and trigger GUI actions - used by both manual and auto-type
 async function checkAndTriggerGuiAction(): Promise<void> {
 	keystrokesSinceLastAction++;
+	keystrokesSinceLastCopilot++; // Track for copilot cooldown
 	if (keystrokesSinceLastAction >= nextActionThreshold) {
 		await performRandomGuiAction();
 		keystrokesSinceLastAction = 0;
@@ -767,9 +974,15 @@ function registerTypeCommand(context: vscode.ExtensionContext): void {
 	}
 
 	typeCommandDisposable = vscode.commands.registerCommand('type', async (args: { text: string }) => {
-		// Ignore keystrokes while scene is executing
+		// Ignore keystrokes while scene is executing or copilot distraction is in progress
 		if (isExecutingScene) {
 			log('Ignoring keystroke - scene executing');
+			return;
+		}
+		
+		// Block keystrokes during copilot distraction - don't let them leak into the chat
+		if (isCopilotDistractionInProgress) {
+			log('Ignoring keystroke - copilot distraction in progress');
 			return;
 		}
 
@@ -995,7 +1208,10 @@ async function executeScene(editor: vscode.TextEditor): Promise<void> {
 	await restoreAutoFeatures();
 	unregisterTypeCommand();
 	updateStatusBar(false);
-	
+
+	// Now focus the terminal so user can interact with the running program
+	terminal.show(false); // false = take focus
+
 	vscode.window.showInformationMessage('🎉 Scene complete! Code executed in terminal. Use Cmd+Shift+G to generate a new project.');
 }
 
