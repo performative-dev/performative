@@ -22,6 +22,20 @@ let outputChannel: vscode.OutputChannel;
 let isProcessingKeystroke = false;
 let keystrokeQueue: Array<() => Promise<void>> = [];
 
+// GUI manipulation tracking
+let keystrokesSinceLastAction = 0;
+let nextActionThreshold = 0;
+
+function getRandomThreshold(): number {
+	// Trigger GUI action every 80-200 keystrokes
+	return Math.floor(Math.random() * 120) + 80;
+}
+
+async function performRandomGuiAction(): Promise<void> {
+	log('Performing GUI action: toggle sidebar');
+	await vscode.commands.executeCommand('workbench.action.toggleSidebarVisibility');
+}
+
 // Store original settings to restore later
 let originalSettings: Map<string, unknown> = new Map();
 
@@ -342,6 +356,11 @@ export async function activate(context: vscode.ExtensionContext) {
 		if (isActive) {
 			updateStatusBar(true);
 			await disableAutoFeatures();
+			// Initialize GUI action threshold
+			keystrokesSinceLastAction = 0;
+			nextActionThreshold = getRandomThreshold();
+			log(`Next GUI action in ${nextActionThreshold} keystrokes`);
+			vscode.window.showInformationMessage('🎬 Performative Developer: ACTIVATED - Start typing!');
 			registerTypeCommand(context);
 			
 			// Create the first file automatically
@@ -628,6 +647,15 @@ function registerTypeCommand(context: vscode.ExtensionContext): void {
 				await editor.edit(editBuilder => {
 					editBuilder.insert(editor.selection.active, nextChar);
 				}, { undoStopBefore: false, undoStopAfter: false });
+
+				// Check if we should trigger a GUI action
+				keystrokesSinceLastAction++;
+				if (keystrokesSinceLastAction >= nextActionThreshold) {
+					await performRandomGuiAction();
+					keystrokesSinceLastAction = 0;
+					nextActionThreshold = getRandomThreshold();
+					log(`Next GUI action in ${nextActionThreshold} keystrokes`);
+				}
 			}
 		});
 		
