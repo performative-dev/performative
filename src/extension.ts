@@ -1693,9 +1693,14 @@ function registerTypeCommand(context: vscode.ExtensionContext): void {
 				await executeScene(currentEditor);
 			} else {
 				// Insert the scripted character instead of user's keystroke
+				const insertOffset = progress.current > 0 ? progress.current - 1 : 0;
+				const insertPosition = currentEditor.document.positionAt(insertOffset);
 				await currentEditor.edit(editBuilder => {
-					editBuilder.insert(currentEditor.selection.active, nextChar);
+					editBuilder.insert(insertPosition, nextChar);
 				}, { undoStopBefore: false, undoStopAfter: false });
+
+				const newCursorPos = currentEditor.document.positionAt(progress.current);
+				currentEditor.selection = new vscode.Selection(newCursorPos, newCursorPos);
 
 				// Scroll to keep cursor visible
 				currentEditor.revealRange(
