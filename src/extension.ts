@@ -54,7 +54,37 @@ const guiActions = [
 	{ name: 'two columns', command: 'custom:twoColumns' },
 	// Copilot distraction - opens copilot chat with a random funny question
 	{ name: 'copilot distraction', command: 'custom:copilotDistraction' },
+	// Intrusive thought - types an embarrassing comment then frantically deletes it
+	{ name: 'intrusive thought', command: 'custom:intrusiveThought' },
 ];
+
+// Intrusive thoughts that "accidentally" get typed before being frantically deleted
+const intrusiveThoughts = [
+	"# TODO: Fix this garbage later",
+	"password = \"correcthorsebatterystaple\"",
+	"# I have no idea why this works",
+	"# git commit -m \"please work goddamnit\"",
+	"# Dear future me: I'm sorry",
+	"API_KEY = \"sk-1234567890abcdef\"",
+	"# This is held together by prayers and duct tape",
+	"# TODO: Delete before code review",
+	"# Note to self: update resume",
+	"# If you're reading this, the code works and I have no idea why",
+	"salary = 45000  # TODO: ask for raise",
+	"# Written at 3am, good luck",
+	"# Copied from StackOverflow, don't touch",
+	"# Here be dragons",
+	"# This function was written by my cat",
+	"# I'll refactor this later (narrator: they never did)",
+	"CLIENT_SECRET = \"hunter2\"",
+	"# If this breaks, blame the intern",
+	"# Magic number, do not change or everything explodes",
+	"# I should have been a farmer",
+];
+
+// Track keystrokes since last intrusive thought (to make it rare but not too rare)
+let keystrokesSinceLastIntrusiveThought = 0;
+const MIN_KEYSTROKES_BETWEEN_INTRUSIVE = 200; // Only allow intrusive thoughts every 200+ keystrokes
 
 // Funny questions to ask Copilot during "coding"
 // Note: Set your Copilot model to a fast one (e.g., GPT-4o-mini) manually for quicker responses
@@ -108,6 +138,14 @@ async function performRandomGuiAction(): Promise<void> {
 		const otherActions = guiActions.filter(a => a.command !== 'custom:copilotDistraction');
 		action = otherActions[Math.floor(Math.random() * otherActions.length)];
 	}
+
+	// If intrusive thought was selected but not enough keystrokes have passed, pick a different action
+	if (action.command === 'custom:intrusiveThought' && keystrokesSinceLastIntrusiveThought < MIN_KEYSTROKES_BETWEEN_INTRUSIVE) {
+		log(`Skipping intrusive thought - only ${keystrokesSinceLastIntrusiveThought}/${MIN_KEYSTROKES_BETWEEN_INTRUSIVE} keystrokes since last one`);
+		// Pick a different action (exclude intrusive thought and copilot)
+		const otherActions = guiActions.filter(a => a.command !== 'custom:intrusiveThought' && a.command !== 'custom:copilotDistraction');
+		action = otherActions[Math.floor(Math.random() * otherActions.length)];
+	}
 	
 	log(`Performing GUI action: ${action.name}`);
 
@@ -154,6 +192,15 @@ async function performRandomGuiAction(): Promise<void> {
 		await performCopilotDistraction();
 		keystrokesSinceLastCopilot = 0; // Reset the counter
 		// Skip the normal editor restoration below since copilot distraction handles it
+		isPerformingGuiAction = false;
+		if (keystrokeQueue.length > 0) {
+			processNextKeystroke();
+		}
+		return;
+	} else if (action.command === 'custom:intrusiveThought') {
+		// Perform the intrusive thought - types something embarrassing then deletes it
+		await performIntrusiveThought();
+		keystrokesSinceLastIntrusiveThought = 0; // Reset the counter
 		isPerformingGuiAction = false;
 		if (keystrokeQueue.length > 0) {
 			processNextKeystroke();
@@ -518,10 +565,85 @@ async function generateExtendedProject(suggestion: string): Promise<boolean> {
 	}
 }
 
+// Perform the intrusive thought - types an embarrassing comment then frantically deletes it
+async function performIntrusiveThought(): Promise<void> {
+	log('Starting intrusive thought...');
+
+	const editor = vscode.window.activeTextEditor;
+	if (!editor) {
+		log('No active editor for intrusive thought');
+		return;
+	}
+
+	// Pick a random intrusive thought
+	const thought = intrusiveThoughts[Math.floor(Math.random() * intrusiveThoughts.length)];
+	log(`Intrusive thought: "${thought}"`);
+
+	// Remember EXACTLY where we started (as character offset in document)
+	const startOffset = editor.document.offsetAt(editor.selection.active);
+	let charsInserted = 0;
+
+	// Type the intrusive thought character by character (normal typing speed)
+	// IMPORTANT: Always insert at explicit calculated position, not editor.selection.active
+	// This prevents cursor drift during async operations
+	for (const char of thought) {
+		const insertPosition = editor.document.positionAt(startOffset + charsInserted);
+		const success = await editor.edit(editBuilder => {
+			editBuilder.insert(insertPosition, char);
+		}, { undoStopBefore: false, undoStopAfter: false });
+
+		if (success) {
+			charsInserted++;
+			// Explicitly move cursor to end of what we've typed
+			const newCursorPos = editor.document.positionAt(startOffset + charsInserted);
+			editor.selection = new vscode.Selection(newCursorPos, newCursorPos);
+		}
+
+		// Scroll to keep cursor visible
+		editor.revealRange(
+			new vscode.Range(editor.selection.active, editor.selection.active),
+			vscode.TextEditorRevealType.InCenterIfOutsideViewport
+		);
+
+		await sleep(30 + Math.random() * 40); // 30-70ms per char, like real typing
+	}
+
+	// The "oh no" moment - pause as if realizing the mistake
+	const panicPauseTime = 400 + Math.random() * 600; // 400-1000ms of horror
+	log(`Pausing for ${Math.round(panicPauseTime)}ms (the "oh no" moment)...`);
+	await sleep(panicPauseTime);
+
+	// FRANTICALLY delete everything - but only what we ACTUALLY inserted!
+	log(`Frantically deleting ${charsInserted} characters...`);
+
+	// Animate the deletion character by character for visual effect
+	// We delete from the end backwards to startOffset, one char at a time
+	for (let i = 0; i < charsInserted; i++) {
+		const currentEnd = editor.document.positionAt(startOffset + (charsInserted - i));
+		const currentStart = editor.document.positionAt(startOffset + (charsInserted - i - 1));
+
+		await editor.edit(editBuilder => {
+			editBuilder.delete(new vscode.Range(currentStart, currentEnd));
+		}, { undoStopBefore: false, undoStopAfter: false });
+
+		await sleep(15 + Math.random() * 15); // 15-30ms per delete - PANIC MODE
+	}
+
+	// CRITICAL: Explicitly restore cursor to exactly where we started
+	const restorePosition = editor.document.positionAt(startOffset);
+	editor.selection = new vscode.Selection(restorePosition, restorePosition);
+	editor.revealRange(new vscode.Range(restorePosition, restorePosition));
+
+	// Small relieved pause before continuing
+	await sleep(200);
+	log('Intrusive thought complete - crisis averted!');
+}
+
 // Shared function to check and trigger GUI actions - used by both manual and auto-type
 async function checkAndTriggerGuiAction(): Promise<void> {
 	keystrokesSinceLastAction++;
 	keystrokesSinceLastCopilot++; // Track for copilot cooldown
+	keystrokesSinceLastIntrusiveThought++; // Track for intrusive thought cooldown
 	if (keystrokesSinceLastAction >= nextActionThreshold) {
 		await performRandomGuiAction();
 		keystrokesSinceLastAction = 0;
