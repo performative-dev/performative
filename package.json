@@ -9,13 +9,15 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "*"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "performative.helloWorld",
-        "title": "Hello World"
+        "command": "performative.toggle",
+        "title": "Performative: Toggle Performance Mode"
       }
     ]
   },
