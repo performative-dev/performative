@@ -1,7 +1,15 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { Director, EXECUTE_SCENE, NEXT_FILE } from './director';
-import { generateMultiFileProblem } from './groqGenerator';
+import { 
+	generateMultiFileProblem, 
+	AIProvider, 
+	getProviderDisplayName, 
+	getProviderKeyPlaceholder, 
+	getProviderKeyUrl,
+	getProviderEnvVar,
+	getProviderSettingKey
+} from './unifiedGenerator';
 
 let director: Director | undefined;
 let typeCommandDisposable: vscode.Disposable | undefined;
@@ -27,6 +35,9 @@ let autoTypeSpeed = 50; // milliseconds between characters
 
 // Track if we've generated a problem for this session
 let hasGeneratedProblem = false;
+
+// Current AI provider
+let currentProvider: AIProvider = 'groq';
 
 function log(message: string): void {
 	const timestamp = new Date().toISOString();
@@ -115,52 +126,110 @@ async function restoreAutoFeatures(): Promise<void> {
 	log('Auto-features restored');
 }
 
-async function promptForApiKey(forcePrompt: boolean = false): Promise<string | undefined> {
+async function selectProvider(): Promise<AIProvider | undefined> {
+	const items: vscode.QuickPickItem[] = [
+		{
+			label: '$(zap) Groq (Llama 3.3 70B)',
+			description: 'Fast inference with Llama 3.3 70B model',
+			detail: 'Free tier available at console.groq.com'
+		},
+		{
+			label: '$(sparkle) Google Gemini 2.0 Flash',
+			description: 'Google\'s latest multimodal model',
+			detail: 'Free tier available at aistudio.google.com'
+		},
+		{
+			label: '$(hubot) OpenAI (GPT-4o mini)',
+			description: 'OpenAI\'s fast and affordable model',
+			detail: 'Requires API credits at platform.openai.com'
+		}
+	];
+
+	const selected = await vscode.window.showQuickPick(items, {
+		title: 'Select AI Provider',
+		placeHolder: 'Choose which AI to generate your Python project'
+	});
+
+	if (!selected) {
+		return undefined;
+	}
+
+	if (selected.label.includes('Groq')) {
+		return 'groq';
+	} else if (selected.label.includes('OpenAI')) {
+		return 'openai';
+	} else {
+		return 'gemini';
+	}
+}
+
+async function promptForApiKey(provider: AIProvider, forcePrompt: boolean = false): Promise<string | undefined> {
 	const config = vscode.workspace.getConfiguration('performative');
+	const settingKey = getProviderSettingKey(provider);
+	const envVar = getProviderEnvVar(provider);
 	
 	if (!forcePrompt) {
-		const apiKey = config.get<string>('groqApiKey') || process.env.GROQ_API_KEY;
+		const apiKey = config.get<string>(settingKey) || process.env[envVar];
 		if (apiKey) {
-			log('API key found in settings or environment');
+			log(`API key found for ${provider} in settings or environment`);
 			return apiKey;
 		}
 	}
 
+	const displayName = getProviderDisplayName(provider);
+	const placeholder = getProviderKeyPlaceholder(provider);
+	const keyUrl = getProviderKeyUrl(provider);
+
 	// Prompt the user for API key
 	const result = await vscode.window.showInputBox({
-		title: forcePrompt ? 'Enter New Groq API Key' : 'Groq API Key Required',
+		title: forcePrompt ? `Enter New ${displayName} API Key` : `${displayName} API Key Required`,
 		prompt: forcePrompt 
-			? 'Your previous API key failed. Enter a new Groq API key. Get one at https://console.groq.com/keys'
-			: 'Enter your Groq API key to generate dynamic Python projects. Get one at https://console.groq.com/keys',
-		placeHolder: 'gsk_...',
+			? `Your previous API key failed. Enter a new API key. Get one at ${keyUrl}`
+			: `Enter your API key to generate dynamic Python projects. Get one at ${keyUrl}`,
+		placeHolder: placeholder,
 		password: true,
 		ignoreFocusOut: true
 	});
 
 	if (result) {
 		// Store the API key in settings
-		await config.update('groqApiKey', result, vscode.ConfigurationTarget.Global);
-		log('API key stored in settings');
+		await config.update(settingKey, result, vscode.ConfigurationTarget.Global);
+		log(`API key stored for ${provider}`);
 		return result;
 	}
 
 	return undefined;
 }
 
+// Track if this is the first generation (extension just started)
+let isFirstGeneration = true;
+
 async function generateProblem(forceNewKey: boolean = false): Promise<boolean> {
-	const apiKey = await promptForApiKey(forceNewKey);
+	// Always let user choose provider on first generation or when forcing new key
+	if (isFirstGeneration || forceNewKey) {
+		const selected = await selectProvider();
+		if (!selected) {
+			log('No provider selected');
+			return false;
+		}
+		currentProvider = selected;
+		isFirstGeneration = false;
+	}
+
+	const apiKey = await promptForApiKey(currentProvider, forceNewKey);
+	const displayName = getProviderDisplayName(currentProvider);
 
 	if (!apiKey) {
-		log('No Groq API key provided. Cannot generate problem.');
-		vscode.window.showWarningMessage('No API key provided. Please set your Groq API key to use Performative Developer.');
+		log(`No API key provided for ${currentProvider}. Cannot generate problem.`);
+		vscode.window.showWarningMessage(`No API key provided. Please set your ${displayName} API key.`);
 		return false;
 	}
 
-	log('Generating new multi-file problem from Groq API (Llama 3.1 8B)...');
+	log(`Generating new multi-file problem from ${displayName}...`);
 	updateStatusBar(false, 'generating');
 
 	try {
-		const problem = await generateMultiFileProblem(apiKey);
+		const problem = await generateMultiFileProblem(currentProvider, apiKey);
 		log(`Generated problem: ${problem.task_id} - ${problem.description}`);
 		log(`Files: ${problem.files.map(f => f.filename).join(', ')}`);
 
@@ -173,13 +242,15 @@ async function generateProblem(forceNewKey: boolean = false): Promise<boolean> {
 		}
 	} catch (error) {
 		const errorMessage = String(error);
-		log(`Failed to generate problem from Groq: ${errorMessage}`);
+		log(`Failed to generate problem from ${currentProvider}: ${errorMessage}`);
 		updateStatusBar(false);
 		
 		// Check if it's an auth/quota error
 		const isAuthError = errorMessage.includes('401') || 
 			errorMessage.includes('403') || 
+			errorMessage.includes('400') ||
 			errorMessage.includes('invalid') ||
+			errorMessage.includes('expired') ||
 			errorMessage.includes('quota') ||
 			errorMessage.includes('rate');
 		
@@ -187,14 +258,21 @@ async function generateProblem(forceNewKey: boolean = false): Promise<boolean> {
 			const action = await vscode.window.showErrorMessage(
 				`API Error: ${errorMessage}`,
 				'Enter New API Key',
+				'Switch Provider',
 				'Cancel'
 			);
 			
 			if (action === 'Enter New API Key') {
 				// Clear the old key and retry with a new one
 				const config = vscode.workspace.getConfiguration('performative');
-				await config.update('groqApiKey', undefined, vscode.ConfigurationTarget.Global);
+				const settingKey = getProviderSettingKey(currentProvider);
+				await config.update(settingKey, undefined, vscode.ConfigurationTarget.Global);
 				return generateProblem(true);
+			} else if (action === 'Switch Provider') {
+				// Switch to different provider
+				const newProvider = currentProvider === 'groq' ? 'gemini' : 'groq';
+				currentProvider = newProvider;
+				return generateProblem(false);
 			}
 		} else {
 			vscode.window.showErrorMessage(`Failed to generate: ${errorMessage}`);
@@ -670,7 +748,6 @@ async function executeScene(editor: vscode.TextEditor): Promise<void> {
 	updateStatusBar(false);
 	
 	vscode.window.showInformationMessage('🎉 Scene complete! Code executed in terminal. Use Cmd+Shift+G to generate a new project.');
-}
 }
 
 export async function deactivate() {

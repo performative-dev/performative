@@ -20,7 +20,19 @@
         "performative.groqApiKey": {
           "type": "string",
           "default": "",
-          "description": "Your Groq API key for generating dynamic multi-file projects with Llama 3.1 8B. Get one at https://console.groq.com/keys",
+          "description": "Your Groq API key for generating projects with Llama 3.3 70B. Get one at https://console.groq.com/keys",
+          "scope": "application"
+        },
+        "performative.geminiApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Your Google Gemini API key for generating projects. Get one at https://aistudio.google.com/apikey",
+          "scope": "application"
+        },
+        "performative.openaiApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Your OpenAI API key for generating projects with GPT-4o mini. Get one at https://platform.openai.com/api-keys",
           "scope": "application"
         }
       }

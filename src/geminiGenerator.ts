@@ -1,28 +1,31 @@
 import * as https from 'https';
 import { MultiFileProblem, GENERATION_PROMPT } from './types';
 
-export async function generateWithGroq(apiKey: string): Promise<MultiFileProblem> {
+export async function generateWithGemini(apiKey: string): Promise<MultiFileProblem> {
     return new Promise((resolve, reject) => {
         const requestBody = JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
-            messages: [
+            contents: [
                 {
-                    role: 'user',
-                    content: GENERATION_PROMPT
+                    parts: [
+                        {
+                            text: GENERATION_PROMPT
+                        }
+                    ]
                 }
             ],
-            temperature: 0.3,
-            max_tokens: 4096,
-            response_format: { type: 'json_object' }
+            generationConfig: {
+                temperature: 0.3,
+                maxOutputTokens: 4096,
+                responseMimeType: "application/json"
+            }
         });
 
         const options: https.RequestOptions = {
-            hostname: 'api.groq.com',
-            path: '/openai/v1/chat/completions',
+            hostname: 'generativelanguage.googleapis.com',
+            path: `/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`,
                 'Content-Length': Buffer.byteLength(requestBody)
             }
         };
@@ -37,26 +40,26 @@ export async function generateWithGroq(apiKey: string): Promise<MultiFileProblem
             res.on('end', () => {
                 try {
                     if (res.statusCode !== 200) {
-                        reject(new Error(`Groq API error (${res.statusCode}): ${data}`));
+                        reject(new Error(`Gemini API error (${res.statusCode}): ${data}`));
                         return;
                     }
 
                     const response = JSON.parse(data);
                     
-                    // Extract the text content from Groq's OpenAI-compatible response
-                    const choices = response.choices;
-                    if (!choices || choices.length === 0) {
-                        reject(new Error('No choices in Groq response'));
+                    // Extract the text content from Gemini's response
+                    const candidates = response.candidates;
+                    if (!candidates || candidates.length === 0) {
+                        reject(new Error('No candidates in Gemini response'));
                         return;
                     }
 
-                    const message = choices[0].message;
-                    if (!message || !message.content) {
-                        reject(new Error('No message content in Groq response'));
+                    const content = candidates[0].content;
+                    if (!content || !content.parts || content.parts.length === 0) {
+                        reject(new Error('No content parts in Gemini response'));
                         return;
                     }
 
-                    const text = message.content;
+                    const text = content.parts[0].text;
                     
                     // Parse the JSON from the text
                     let problem: MultiFileProblem;
@@ -81,7 +84,7 @@ export async function generateWithGroq(apiKey: string): Promise<MultiFileProblem
 
                     // Validate the problem structure
                     if (!problem.task_id || !problem.files || !Array.isArray(problem.files) || problem.files.length === 0) {
-                        reject(new Error('Invalid problem structure from Groq'));
+                        reject(new Error('Invalid problem structure from Gemini'));
                         return;
                     }
 
@@ -95,7 +98,7 @@ export async function generateWithGroq(apiKey: string): Promise<MultiFileProblem
 
                     resolve(problem);
                 } catch (error) {
-                    reject(new Error(`Failed to parse Groq response: ${error}`));
+                    reject(new Error(`Failed to parse Gemini response: ${error}`));
                 }
             });
         });

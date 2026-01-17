@@ -1,10 +1,10 @@
 import * as https from 'https';
 import { MultiFileProblem, GENERATION_PROMPT } from './types';
 
-export async function generateWithGroq(apiKey: string): Promise<MultiFileProblem> {
+export async function generateWithOpenAI(apiKey: string): Promise<MultiFileProblem> {
     return new Promise((resolve, reject) => {
         const requestBody = JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
+            model: 'gpt-4o-mini',
             messages: [
                 {
                     role: 'user',
@@ -17,8 +17,8 @@ export async function generateWithGroq(apiKey: string): Promise<MultiFileProblem
         });
 
         const options: https.RequestOptions = {
-            hostname: 'api.groq.com',
-            path: '/openai/v1/chat/completions',
+            hostname: 'api.openai.com',
+            path: '/v1/chat/completions',
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -37,22 +37,22 @@ export async function generateWithGroq(apiKey: string): Promise<MultiFileProblem
             res.on('end', () => {
                 try {
                     if (res.statusCode !== 200) {
-                        reject(new Error(`Groq API error (${res.statusCode}): ${data}`));
+                        reject(new Error(`OpenAI API error (${res.statusCode}): ${data}`));
                         return;
                     }
 
                     const response = JSON.parse(data);
                     
-                    // Extract the text content from Groq's OpenAI-compatible response
+                    // Extract the text content from OpenAI's response
                     const choices = response.choices;
                     if (!choices || choices.length === 0) {
-                        reject(new Error('No choices in Groq response'));
+                        reject(new Error('No choices in OpenAI response'));
                         return;
                     }
 
                     const message = choices[0].message;
                     if (!message || !message.content) {
-                        reject(new Error('No message content in Groq response'));
+                        reject(new Error('No message content in OpenAI response'));
                         return;
                     }
 
@@ -81,7 +81,7 @@ export async function generateWithGroq(apiKey: string): Promise<MultiFileProblem
 
                     // Validate the problem structure
                     if (!problem.task_id || !problem.files || !Array.isArray(problem.files) || problem.files.length === 0) {
-                        reject(new Error('Invalid problem structure from Groq'));
+                        reject(new Error('Invalid problem structure from OpenAI'));
                         return;
                     }
 
@@ -95,13 +95,13 @@ export async function generateWithGroq(apiKey: string): Promise<MultiFileProblem
 
                     resolve(problem);
                 } catch (error) {
-                    reject(new Error(`Failed to parse Groq response: ${error}`));
+                    reject(new Error(`Failed to parse OpenAI response: ${error}`));
                 }
             });
         });
 
         req.on('error', (error) => {
-            reject(new Error(`Request failed: ${error.message}`));
+            reject(new Error(`OpenAI request failed: ${error.message}`));
         });
 
         req.write(requestBody);
