@@ -127,4 +127,16 @@ export class Director {
             totalFiles: this.isMultiFile() ? this.fileScripts.length : 1
         };
     }
+
+    public setGeneratedProblem(problem: Problem): void {
+        // Set the generated problem in the problem manager
+        this.problemManager.setActiveGeneratedProblem(problem);
+        // Reset state so the next toggle/startNewScene uses this problem
+        this.currentProblem = undefined;
+        this.script = '';
+        this.bufferIndex = 0;
+        this.fileScripts = [];
+        this.currentFileIndex = 0;
+        console.log(`Set generated problem: ${problem.task_id}`);
+    }
 }
