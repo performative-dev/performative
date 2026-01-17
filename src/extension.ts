@@ -1459,13 +1459,17 @@ async function autoTypeNextChar(): Promise<void> {
 	// Handle diff mode DELETE_LINE
 	if (nextChar === DELETE_LINE) {
 		log('Auto-type diff mode: Deleting line');
-		const lineNumber = editor.selection.active.line;
-		const line = editor.document.lineAt(lineNumber);
+		// Always delete from line 0 (top of file) since we're deleting content sequentially
+		const line = editor.document.lineAt(0);
 		const range = line.rangeIncludingLineBreak;
 		await editor.edit(editBuilder => {
 			editBuilder.delete(range);
 		}, { undoStopBefore: false, undoStopAfter: false });
-		
+
+		// Keep cursor at start of file for next delete
+		const startPos = new vscode.Position(0, 0);
+		editor.selection = new vscode.Selection(startPos, startPos);
+
 		// Check if we need to switch files
 		const diffFilename = director.getDiffFilename();
 		const currentFilename = path.basename(editor.document.uri.fsPath);
@@ -1512,10 +1516,28 @@ async function autoTypeNextChar(): Promise<void> {
 					}, 300);
 					return;
 				}
+
+				// In diff mode, always append to end of document
+				const insertPosition = editor.document.positionAt(editor.document.getText().length);
+
+				await editor.edit(editBuilder => {
+					editBuilder.insert(insertPosition, nextChar);
+				}, { undoStopBefore: false, undoStopAfter: false });
+
+				// Move cursor to end after insert
+				const newCursorPos = editor.document.positionAt(editor.document.getText().length);
+				editor.selection = new vscode.Selection(newCursorPos, newCursorPos);
+				editor.revealRange(
+					new vscode.Range(newCursorPos, newCursorPos),
+					vscode.TextEditorRevealType.InCenterIfOutsideViewport
+				);
+
+				// Check if we should trigger a GUI action
+				await checkAndTriggerGuiAction();
+				return;
 			}
-		
-			// Insert at position tracked by Director (progress.current - 1 since getNextChar already advanced)
-			// This is more reliable than document.getText().length for multi-file projects
+
+			// Non-diff mode: Insert at position tracked by Director
 			const progress = director.getProgress();
 			const insertOffset = progress.current > 0 ? progress.current - 1 : 0;
 			const insertPosition = editor.document.positionAt(insertOffset);
@@ -1708,14 +1730,17 @@ function registerTypeCommand(context: vscode.ExtensionContext): void {
 			// Handle diff mode operations
 			if (nextChar === DELETE_LINE) {
 				log('Diff mode: Deleting line');
-				// Delete the current line
-				const lineNumber = currentEditor.selection.active.line;
-				const line = currentEditor.document.lineAt(lineNumber);
+				// Always delete from line 0 (top of file) since we're deleting content sequentially
+				const line = currentEditor.document.lineAt(0);
 				const range = line.rangeIncludingLineBreak;
 				await currentEditor.edit(editBuilder => {
 					editBuilder.delete(range);
 				}, { undoStopBefore: false, undoStopAfter: false });
-				
+
+				// Keep cursor at start of file for next delete
+				const startPos = new vscode.Position(0, 0);
+				currentEditor.selection = new vscode.Selection(startPos, startPos);
+
 				// Check if we need to switch files for next operation
 				const diffFilename = director!.getDiffFilename();
 				const currentFilename = path.basename(currentEditor.document.uri.fsPath);
@@ -1745,15 +1770,38 @@ function registerTypeCommand(context: vscode.ExtensionContext): void {
 						// Re-get editor after switch
 						const newEditor = vscode.window.activeTextEditor;
 						if (newEditor) {
+							// In diff mode, always append to end of document
+							const insertPos = newEditor.document.positionAt(newEditor.document.getText().length);
 							await newEditor.edit(editBuilder => {
-								editBuilder.insert(newEditor.selection.active, nextChar);
+								editBuilder.insert(insertPos, nextChar);
 							}, { undoStopBefore: false, undoStopAfter: false });
+							// Update cursor to end
+							const newCursorPos = newEditor.document.positionAt(newEditor.document.getText().length);
+							newEditor.selection = new vscode.Selection(newCursorPos, newCursorPos);
 						}
 						return;
 					}
+
+					// In diff mode (same file), always append to end of document
+					const insertPos = currentEditor.document.positionAt(currentEditor.document.getText().length);
+					await currentEditor.edit(editBuilder => {
+						editBuilder.insert(insertPos, nextChar);
+					}, { undoStopBefore: false, undoStopAfter: false });
+
+					// Move cursor to end after insert
+					const newCursorPos = currentEditor.document.positionAt(currentEditor.document.getText().length);
+					currentEditor.selection = new vscode.Selection(newCursorPos, newCursorPos);
+					currentEditor.revealRange(
+						new vscode.Range(newCursorPos, newCursorPos),
+						vscode.TextEditorRevealType.InCenterIfOutsideViewport
+					);
+
+					// Check if we should trigger a GUI action
+					await checkAndTriggerGuiAction();
+					return;
 				}
-				
-				// Insert the scripted character instead of user's keystroke
+
+				// Non-diff mode: Insert the scripted character at cursor position
 				await currentEditor.edit(editBuilder => {
 					editBuilder.insert(currentEditor.selection.active, nextChar);
 				}, { undoStopBefore: false, undoStopAfter: false });
