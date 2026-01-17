@@ -1,21 +1,118 @@
-[{
-    "task_id": "Sample/0",
+[
+  {
+    "task_id": "Simple/0",
+    "type": "single",
     "prompt": "def hello_world():\n    \"\"\"\n    Return the string 'Hello World!'\n    \"\"\"\n",
     "entry_point": "hello_world",
     "canonical_solution": "    return 'Hello World!'\n",
     "test": "\ndef check(candidate):\n    assert candidate() == 'Hello World!'\n"
-},
-{
-    "task_id": "Sample/1",
-    "prompt": "def add(a: int, b: int) -> int:\n    \"\"\"\n    Return the sum of a and b.\n    \"\"\"\n",
-    "entry_point": "add",
-    "canonical_solution": "    return a + b\n",
-    "test": "\ndef check(candidate):\n    assert candidate(1, 2) == 3\n    assert candidate(10, 20) == 30\n    assert candidate(-5, 5) == 0\n"
-},
-{
-    "task_id": "Sample/2",
-    "prompt": "def is_even(n: int) -> bool:\n    \"\"\"\n    Return True if n is even, False otherwise.\n    \"\"\"\n",
-    "entry_point": "is_even",
-    "canonical_solution": "    return n % 2 == 0\n",
-    "test": "\ndef check(candidate):\n    assert candidate(2) is True\n    assert candidate(3) is False\n    assert candidate(0) is True\n"
-}]
+  },
+  {
+    "task_id": "Simple/1",
+    "type": "single",
+    "prompt": "def fibonacci(n: int) -> int:\n    \"\"\"\n    Return the nth Fibonacci number.\n    fibonacci(0) = 0, fibonacci(1) = 1\n    fibonacci(n) = fibonacci(n-1) + fibonacci(n-2)\n    \"\"\"\n",
+    "entry_point": "fibonacci",
+    "canonical_solution": "    if n <= 1:\n        return n\n    a, b = 0, 1\n    for _ in range(2, n + 1):\n        a, b = b, a + b\n    return b\n",
+    "test": "\ndef check(candidate):\n    assert candidate(0) == 0\n    assert candidate(1) == 1\n    assert candidate(10) == 55\n    assert candidate(20) == 6765\n"
+  },
+  {
+    "task_id": "Simple/2",
+    "type": "single",
+    "prompt": "def is_palindrome(s: str) -> bool:\n    \"\"\"\n    Check if a string is a palindrome.\n    Ignore case and non-alphanumeric characters.\n    \"\"\"\n",
+    "entry_point": "is_palindrome",
+    "canonical_solution": "    cleaned = ''.join(c.lower() for c in s if c.isalnum())\n    return cleaned == cleaned[::-1]\n",
+    "test": "\ndef check(candidate):\n    assert candidate('racecar') is True\n    assert candidate('A man a plan a canal Panama') is True\n    assert candidate('hello') is False\n    assert candidate('') is True\n"
+  },
+  {
+    "task_id": "MultiFile/0",
+    "type": "multi",
+    "description": "A simple calculator module with separate files for operations and main logic",
+    "files": [
+      {
+        "filename": "operations.py",
+        "content": "# Basic mathematical operations module\n\n\ndef add(a: float, b: float) -> float:\n    # Return the sum of two numbers\n    return a + b\n\n\ndef subtract(a: float, b: float) -> float:\n    # Return the difference of two numbers\n    return a - b\n\n\ndef multiply(a: float, b: float) -> float:\n    # Return the product of two numbers\n    return a * b\n\n\ndef divide(a: float, b: float) -> float:\n    # Return the quotient of two numbers\n    if b == 0:\n        raise ValueError(\"Cannot divide by zero\")\n    return a / b\n"
+      },
+      {
+        "filename": "calculator.py",
+        "content": "# Calculator module that uses operations\nfrom operations import add, subtract, multiply, divide\n\n\nclass Calculator:\n    # A simple calculator class\n    \n    def __init__(self):\n        self.history = []\n    \n    def calculate(self, a: float, op: str, b: float) -> float:\n        # Perform a calculation and store in history\n        operations = {\n            '+': add,\n            '-': subtract,\n            '*': multiply,\n            '/': divide\n        }\n        \n        if op not in operations:\n            raise ValueError(f\"Unknown operation: {op}\")\n        \n        result = operations[op](a, b)\n        self.history.append(f\"{a} {op} {b} = {result}\")\n        return result\n    \n    def get_history(self) -> list:\n        # Return calculation history\n        return self.history.copy()\n"
+      },
+      {
+        "filename": "main.py",
+        "content": "# Main entry point for the calculator\nfrom calculator import Calculator\n\n\ndef main():\n    calc = Calculator()\n    \n    # Perform some calculations\n    print(f\"10 + 5 = {calc.calculate(10, '+', 5)}\")\n    print(f\"10 - 5 = {calc.calculate(10, '-', 5)}\")\n    print(f\"10 * 5 = {calc.calculate(10, '*', 5)}\")\n    print(f\"10 / 5 = {calc.calculate(10, '/', 5)}\")\n    \n    print(\"\\nHistory:\")\n    for entry in calc.get_history():\n        print(f\"  {entry}\")\n    \n    print(\"\\n✅ Success\")\n\n\nif __name__ == \"__main__\":\n    main()\n"
+      }
+    ],
+    "entry_file": "main.py"
+  },
+  {
+    "task_id": "MultiFile/1",
+    "type": "multi",
+    "description": "A data processing pipeline with models, utils, and main processor",
+    "files": [
+      {
+        "filename": "models.py",
+        "content": "\"\"\"Data models for the processing pipeline.\"\"\"\nfrom dataclasses import dataclass\nfrom typing import List, Optional\nfrom datetime import datetime\n\n\n@dataclass\nclass User:\n    \"\"\"Represents a user in the system.\"\"\"\n    id: int\n    name: str\n    email: str\n    created_at: datetime\n    is_active: bool = True\n\n\n@dataclass\nclass Transaction:\n    \"\"\"Represents a financial transaction.\"\"\"\n    id: int\n    user_id: int\n    amount: float\n    description: str\n    timestamp: datetime\n    category: Optional[str] = None\n\n\n@dataclass\nclass Report:\n    \"\"\"Summary report for a user.\"\"\"\n    user: User\n    total_transactions: int\n    total_amount: float\n    categories: List[str]\n"
+      },
+      {
+        "filename": "utils.py",
+        "content": "\"\"\"Utility functions for data processing.\"\"\"\nfrom typing import List, Dict, Any\nfrom collections import defaultdict\nfrom models import Transaction\n\n\ndef group_by_category(transactions: List[Transaction]) -> Dict[str, List[Transaction]]:\n    \"\"\"Group transactions by their category.\"\"\"\n    grouped = defaultdict(list)\n    for t in transactions:\n        category = t.category or \"Uncategorized\"\n        grouped[category].append(t)\n    return dict(grouped)\n\n\ndef calculate_total(transactions: List[Transaction]) -> float:\n    \"\"\"Calculate total amount from transactions.\"\"\"\n    return sum(t.amount for t in transactions)\n\n\ndef format_currency(amount: float) -> str:\n    \"\"\"Format amount as currency string.\"\"\"\n    return f\"${amount:,.2f}\"\n\n\ndef filter_by_amount(transactions: List[Transaction], min_amount: float = 0) -> List[Transaction]:\n    \"\"\"Filter transactions by minimum amount.\"\"\"\n    return [t for t in transactions if t.amount >= min_amount]\n"
+      },
+      {
+        "filename": "processor.py",
+        "content": "\"\"\"Main data processor module.\"\"\"\nfrom typing import List\nfrom datetime import datetime\nfrom models import User, Transaction, Report\nfrom utils import group_by_category, calculate_total\n\n\nclass DataProcessor:\n    \"\"\"Processes user and transaction data.\"\"\"\n    \n    def __init__(self):\n        self.users: dict = {}\n        self.transactions: List[Transaction] = []\n    \n    def add_user(self, user: User) -> None:\n        \"\"\"Add a user to the processor.\"\"\"\n        self.users[user.id] = user\n    \n    def add_transaction(self, transaction: Transaction) -> None:\n        \"\"\"Add a transaction to the processor.\"\"\"\n        self.transactions.append(transaction)\n    \n    def get_user_transactions(self, user_id: int) -> List[Transaction]:\n        \"\"\"Get all transactions for a user.\"\"\"\n        return [t for t in self.transactions if t.user_id == user_id]\n    \n    def generate_report(self, user_id: int) -> Report:\n        \"\"\"Generate a report for a user.\"\"\"\n        user = self.users.get(user_id)\n        if not user:\n            raise ValueError(f\"User {user_id} not found\")\n        \n        user_transactions = self.get_user_transactions(user_id)\n        grouped = group_by_category(user_transactions)\n        \n        return Report(\n            user=user,\n            total_transactions=len(user_transactions),\n            total_amount=calculate_total(user_transactions),\n            categories=list(grouped.keys())\n        )\n"
+      },
+      {
+        "filename": "main.py",
+        "content": "\"\"\"Main entry point demonstrating the data pipeline.\"\"\"\nfrom datetime import datetime\nfrom models import User, Transaction\nfrom processor import DataProcessor\nfrom utils import format_currency\n\n\ndef main():\n    # Initialize processor\n    processor = DataProcessor()\n    \n    # Create a user\n    user = User(\n        id=1,\n        name=\"Alice Johnson\",\n        email=\"alice@example.com\",\n        created_at=datetime.now()\n    )\n    processor.add_user(user)\n    \n    # Add some transactions\n    transactions = [\n        Transaction(1, 1, 150.00, \"Grocery shopping\", datetime.now(), \"Food\"),\n        Transaction(2, 1, 50.00, \"Gas station\", datetime.now(), \"Transport\"),\n        Transaction(3, 1, 200.00, \"Electric bill\", datetime.now(), \"Utilities\"),\n        Transaction(4, 1, 75.50, \"Restaurant\", datetime.now(), \"Food\"),\n    ]\n    \n    for t in transactions:\n        processor.add_transaction(t)\n    \n    # Generate and display report\n    report = processor.generate_report(1)\n    \n    print(f\"Report for: {report.user.name}\")\n    print(f\"Email: {report.user.email}\")\n    print(f\"Total Transactions: {report.total_transactions}\")\n    print(f\"Total Amount: {format_currency(report.total_amount)}\")\n    print(f\"Categories: {', '.join(report.categories)}\")\n    print(\"\\n✅ Success\")\n\n\nif __name__ == \"__main__\":\n    main()\n"
+      }
+    ],
+    "entry_file": "main.py"
+  },
+  {
+    "task_id": "MultiFile/2",
+    "type": "multi",
+    "description": "A simple web API structure with routes, handlers, and app setup",
+    "files": [
+      {
+        "filename": "config.py",
+        "content": "\"\"\"Application configuration.\"\"\"\nimport os\n\n\nclass Config:\n    \"\"\"Base configuration class.\"\"\"\n    APP_NAME = \"SimpleAPI\"\n    VERSION = \"1.0.0\"\n    DEBUG = False\n    HOST = \"0.0.0.0\"\n    PORT = 8000\n\n\nclass DevelopmentConfig(Config):\n    \"\"\"Development configuration.\"\"\"\n    DEBUG = True\n    LOG_LEVEL = \"DEBUG\"\n\n\nclass ProductionConfig(Config):\n    \"\"\"Production configuration.\"\"\"\n    DEBUG = False\n    LOG_LEVEL = \"INFO\"\n\n\ndef get_config():\n    \"\"\"Get configuration based on environment.\"\"\"\n    env = os.environ.get(\"APP_ENV\", \"development\")\n    configs = {\n        \"development\": DevelopmentConfig,\n        \"production\": ProductionConfig\n    }\n    return configs.get(env, DevelopmentConfig)()\n"
+      },
+      {
+        "filename": "handlers.py",
+        "content": "\"\"\"Request handlers for the API.\"\"\"\nfrom typing import Dict, Any, List\n\n# In-memory storage for demo\n_items: Dict[int, Dict[str, Any]] = {}\n_next_id = 1\n\n\ndef handle_get_items() -> List[Dict[str, Any]]:\n    \"\"\"Get all items.\"\"\"\n    return list(_items.values())\n\n\ndef handle_get_item(item_id: int) -> Dict[str, Any]:\n    \"\"\"Get a single item by ID.\"\"\"\n    if item_id not in _items:\n        raise KeyError(f\"Item {item_id} not found\")\n    return _items[item_id]\n\n\ndef handle_create_item(data: Dict[str, Any]) -> Dict[str, Any]:\n    \"\"\"Create a new item.\"\"\"\n    global _next_id\n    item = {\n        \"id\": _next_id,\n        \"name\": data.get(\"name\", \"Unnamed\"),\n        \"description\": data.get(\"description\", \"\"),\n        \"price\": data.get(\"price\", 0.0)\n    }\n    _items[_next_id] = item\n    _next_id += 1\n    return item\n\n\ndef handle_delete_item(item_id: int) -> bool:\n    \"\"\"Delete an item by ID.\"\"\"\n    if item_id not in _items:\n        return False\n    del _items[item_id]\n    return True\n"
+      },
+      {
+        "filename": "routes.py",
+        "content": "\"\"\"API route definitions.\"\"\"\nfrom typing import Callable, Dict, Tuple\nfrom handlers import (\n    handle_get_items,\n    handle_get_item,\n    handle_create_item,\n    handle_delete_item\n)\n\n\nclass Router:\n    \"\"\"Simple router for handling API routes.\"\"\"\n    \n    def __init__(self):\n        self.routes: Dict[Tuple[str, str], Callable] = {}\n    \n    def add_route(self, method: str, path: str, handler: Callable) -> None:\n        \"\"\"Register a route handler.\"\"\"\n        self.routes[(method.upper(), path)] = handler\n    \n    def get_handler(self, method: str, path: str) -> Callable:\n        \"\"\"Get handler for a route.\"\"\"\n        key = (method.upper(), path)\n        if key not in self.routes:\n            raise ValueError(f\"No route found for {method} {path}\")\n        return self.routes[key]\n\n\ndef setup_routes(router: Router) -> None:\n    \"\"\"Configure all API routes.\"\"\"\n    router.add_route(\"GET\", \"/items\", handle_get_items)\n    router.add_route(\"GET\", \"/item\", handle_get_item)\n    router.add_route(\"POST\", \"/items\", handle_create_item)\n    router.add_route(\"DELETE\", \"/item\", handle_delete_item)\n"
+      },
+      {
+        "filename": "app.py",
+        "content": "\"\"\"Main application module.\"\"\"\nfrom config import get_config\nfrom routes import Router, setup_routes\n\n\nclass Application:\n    \"\"\"Main application class.\"\"\"\n    \n    def __init__(self):\n        self.config = get_config()\n        self.router = Router()\n        setup_routes(self.router)\n    \n    def run(self) -> None:\n        \"\"\"Run the application.\"\"\"\n        print(f\"Starting {self.config.APP_NAME} v{self.config.VERSION}\")\n        print(f\"Debug mode: {self.config.DEBUG}\")\n        print(f\"Listening on {self.config.HOST}:{self.config.PORT}\")\n        \n        # Simulate some API calls\n        self._demo_api_calls()\n    \n    def _demo_api_calls(self) -> None:\n        \"\"\"Demonstrate API functionality.\"\"\"\n        print(\"\\n--- Demo API Calls ---\")\n        \n        # Create items\n        create_handler = self.router.get_handler(\"POST\", \"/items\")\n        item1 = create_handler({\"name\": \"Widget\", \"price\": 29.99})\n        item2 = create_handler({\"name\": \"Gadget\", \"price\": 49.99})\n        print(f\"Created: {item1}\")\n        print(f\"Created: {item2}\")\n        \n        # Get all items\n        get_all = self.router.get_handler(\"GET\", \"/items\")\n        print(f\"All items: {get_all()}\")\n        \n        # Delete an item\n        delete_handler = self.router.get_handler(\"DELETE\", \"/item\")\n        delete_handler(1)\n        print(\"Deleted item 1\")\n        \n        print(f\"Remaining items: {get_all()}\")\n        print(\"\\n✅ Success\")\n\n\nif __name__ == \"__main__\":\n    app = Application()\n    app.run()\n"
+      }
+    ],
+    "entry_file": "app.py"
+  },
+  {
+    "task_id": "MultiFile/3",
+    "type": "multi",
+    "description": "A testing framework example with test runner and assertions",
+    "files": [
+      {
+        "filename": "assertions.py",
+        "content": "\"\"\"Custom assertion functions for testing.\"\"\"\nfrom typing import Any, Type\n\n\nclass AssertionError(Exception):\n    \"\"\"Custom assertion error with detailed message.\"\"\"\n    pass\n\n\ndef assert_equal(actual: Any, expected: Any, msg: str = \"\") -> None:\n    \"\"\"Assert two values are equal.\"\"\"\n    if actual != expected:\n        error_msg = msg or f\"Expected {expected!r}, got {actual!r}\"\n        raise AssertionError(error_msg)\n\n\ndef assert_true(value: bool, msg: str = \"\") -> None:\n    \"\"\"Assert value is True.\"\"\"\n    if value is not True:\n        raise AssertionError(msg or f\"Expected True, got {value!r}\")\n\n\ndef assert_false(value: bool, msg: str = \"\") -> None:\n    \"\"\"Assert value is False.\"\"\"\n    if value is not False:\n        raise AssertionError(msg or f\"Expected False, got {value!r}\")\n\n\ndef assert_raises(exception: Type[Exception], func, *args, **kwargs) -> None:\n    \"\"\"Assert that a function raises an exception.\"\"\"\n    try:\n        func(*args, **kwargs)\n        raise AssertionError(f\"Expected {exception.__name__} to be raised\")\n    except exception:\n        pass\n\n\ndef assert_in(item: Any, container: Any, msg: str = \"\") -> None:\n    \"\"\"Assert item is in container.\"\"\"\n    if item not in container:\n        raise AssertionError(msg or f\"{item!r} not found in {container!r}\")\n"
+      },
+      {
+        "filename": "test_runner.py",
+        "content": "\"\"\"Simple test runner implementation.\"\"\"\nimport time\nfrom typing import List, Callable, Tuple\nfrom dataclasses import dataclass\n\n\n@dataclass\nclass TestResult:\n    \"\"\"Result of a single test.\"\"\"\n    name: str\n    passed: bool\n    duration: float\n    error: str = \"\"\n\n\nclass TestRunner:\n    \"\"\"Runs tests and collects results.\"\"\"\n    \n    def __init__(self):\n        self.tests: List[Tuple[str, Callable]] = []\n        self.results: List[TestResult] = []\n    \n    def add_test(self, name: str, test_func: Callable) -> None:\n        \"\"\"Add a test to run.\"\"\"\n        self.tests.append((name, test_func))\n    \n    def run_all(self) -> None:\n        \"\"\"Run all registered tests.\"\"\"\n        print(f\"Running {len(self.tests)} tests...\\n\")\n        \n        for name, test_func in self.tests:\n            start = time.time()\n            try:\n                test_func()\n                duration = time.time() - start\n                self.results.append(TestResult(name, True, duration))\n                print(f\"  ✓ {name} ({duration:.3f}s)\")\n            except Exception as e:\n                duration = time.time() - start\n                self.results.append(TestResult(name, False, duration, str(e)))\n                print(f\"  ✗ {name} ({duration:.3f}s)\")\n                print(f\"    Error: {e}\")\n    \n    def summary(self) -> None:\n        \"\"\"Print test summary.\"\"\"\n        passed = sum(1 for r in self.results if r.passed)\n        failed = len(self.results) - passed\n        total_time = sum(r.duration for r in self.results)\n        \n        print(f\"\\n{'='*40}\")\n        print(f\"Tests: {passed} passed, {failed} failed\")\n        print(f\"Time: {total_time:.3f}s\")\n        \n        if failed == 0:\n            print(\"\\n✅ All tests passed!\")\n        else:\n            print(\"\\n❌ Some tests failed\")\n"
+      },
+      {
+        "filename": "sample_tests.py",
+        "content": "\"\"\"Sample test cases demonstrating the framework.\"\"\"\nfrom assertions import (\n    assert_equal,\n    assert_true,\n    assert_false,\n    assert_raises,\n    assert_in\n)\n\n\ndef test_addition():\n    \"\"\"Test basic addition.\"\"\"\n    assert_equal(1 + 1, 2)\n    assert_equal(0 + 0, 0)\n    assert_equal(-1 + 1, 0)\n\n\ndef test_string_operations():\n    \"\"\"Test string operations.\"\"\"\n    assert_equal(\"hello\".upper(), \"HELLO\")\n    assert_equal(\"  spaces  \".strip(), \"spaces\")\n    assert_in(\"world\", \"hello world\")\n\n\ndef test_list_operations():\n    \"\"\"Test list operations.\"\"\"\n    items = [1, 2, 3]\n    assert_equal(len(items), 3)\n    assert_in(2, items)\n    assert_equal(items[0], 1)\n\n\ndef test_boolean_logic():\n    \"\"\"Test boolean assertions.\"\"\"\n    assert_true(5 > 3)\n    assert_false(3 > 5)\n    assert_true(\"python\".startswith(\"py\"))\n\n\ndef test_exception_handling():\n    \"\"\"Test that exceptions are raised correctly.\"\"\"\n    def divide_by_zero():\n        return 1 / 0\n    \n    assert_raises(ZeroDivisionError, divide_by_zero)\n\n\ndef get_all_tests():\n    \"\"\"Return all test functions.\"\"\"\n    return [\n        (\"test_addition\", test_addition),\n        (\"test_string_operations\", test_string_operations),\n        (\"test_list_operations\", test_list_operations),\n        (\"test_boolean_logic\", test_boolean_logic),\n        (\"test_exception_handling\", test_exception_handling),\n    ]\n"
+      },
+      {
+        "filename": "run_tests.py",
+        "content": "\"\"\"Main entry point for running tests.\"\"\"\nfrom test_runner import TestRunner\nfrom sample_tests import get_all_tests\n\n\ndef main():\n    \"\"\"Run all tests using the test runner.\"\"\"\n    runner = TestRunner()\n    \n    # Add all tests\n    for name, test_func in get_all_tests():\n        runner.add_test(name, test_func)\n    \n    # Run tests\n    runner.run_all()\n    \n    # Show summary\n    runner.summary()\n\n\nif __name__ == \"__main__\":\n    main()\n"
+      }
+    ],
+    "entry_file": "run_tests.py"
+  }
+]
