@@ -1,9 +1,11 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { Director, EXECUTE_SCENE, NEXT_FILE } from './director';
+import { Director, EXECUTE_SCENE, NEXT_FILE, DELETE_LINE } from './director';
 import { 
-	generateMultiFileProblem, 
-	AIProvider, 
+	generateMultiFileProblem,
+	extendProject,
+	AIProvider,
+	MultiFileProblem,
 	getProviderDisplayName, 
 	getProviderKeyPlaceholder, 
 	getProviderKeyUrl,
@@ -17,6 +19,10 @@ let statusBarItem: vscode.StatusBarItem | undefined;
 
 // Debug output channel
 let outputChannel: vscode.OutputChannel;
+
+// Extension workflow state
+let isGeneratingExtension = false;
+let copilotSuggestion: string | undefined;
 
 // Lock to prevent race conditions with rapid typing
 let isProcessingKeystroke = false;
@@ -336,6 +342,180 @@ async function performCopilotDistraction(): Promise<void> {
 	
 	isCopilotDistractionInProgress = false;
 	log('Copilot distraction complete');
+}
+
+// Extension request prompt for Copilot
+const EXTENSION_REQUEST_PROMPT = `I just finished writing this Python project. Can you suggest ONE specific feature or extension I could add to make it more useful? Just describe the feature briefly in 1-2 sentences - don't write any code.`;
+
+// Ask Copilot for an extension idea and capture the response
+async function askCopilotForExtension(): Promise<string | undefined> {
+	log('Asking Copilot for extension idea...');
+	
+	// Capture current editor state
+	const editorBefore = vscode.window.activeTextEditor;
+	const documentUriBefore = editorBefore?.document.uri;
+	const cursorPositionBefore = editorBefore?.selection.active;
+	
+	try {
+		// Open GitHub Copilot Chat panel
+		try {
+			await vscode.commands.executeCommand('workbench.action.chat.open');
+			log('Opened Copilot Chat panel');
+		} catch (e) {
+			log('Could not open Copilot Chat - extension may not be installed');
+			return undefined;
+		}
+		
+		await sleep(600);
+		
+		// Clear any existing text
+		await vscode.commands.executeCommand('editor.action.selectAll');
+		await sleep(50);
+		await vscode.commands.executeCommand('deleteLeft');
+		await sleep(100);
+		
+		// Type the extension request
+		await typeTextSlowly(EXTENSION_REQUEST_PROMPT, 25);
+		
+		await sleep(300);
+		
+		// Submit the question
+		try {
+			await vscode.commands.executeCommand('workbench.action.chat.submit');
+			log('Submitted extension request to Copilot');
+		} catch {
+			try {
+				await vscode.commands.executeCommand('workbench.action.chat.acceptInput');
+			} catch {
+				log('Could not submit chat message');
+				return undefined;
+			}
+		}
+		
+		// Wait for Copilot to respond
+		const responseWaitTime = 15000 + Math.random() * 5000; // 15-20 seconds
+		log(`Waiting ${Math.round(responseWaitTime)}ms for Copilot response...`);
+		await sleep(responseWaitTime);
+		
+		// Try to capture the response using clipboard
+		// First, select the last response in chat
+		try {
+			// Use keyboard to select and copy
+			await vscode.commands.executeCommand('workbench.action.chat.selectLastResponse');
+			await sleep(200);
+			await vscode.commands.executeCommand('editor.action.clipboardCopyAction');
+			await sleep(100);
+			
+			// Read from clipboard
+			const clipboardContent = await vscode.env.clipboard.readText();
+			if (clipboardContent && clipboardContent.length > 10) {
+				log(`Captured Copilot suggestion: ${clipboardContent.substring(0, 100)}...`);
+				copilotSuggestion = clipboardContent;
+			}
+		} catch (e) {
+			log(`Could not capture Copilot response: ${e}`);
+		}
+		
+		// If we couldn't capture the response, use a fallback
+		if (!copilotSuggestion) {
+			copilotSuggestion = "Add a search/filter feature to find items quickly";
+			log(`Using fallback suggestion: ${copilotSuggestion}`);
+		}
+		
+		// Read the response for a bit
+		await sleep(3000);
+		
+		// Type "thank you!" in response
+		log('Typing thank you message...');
+		await typeTextSlowly("thank you!", 30);
+		await sleep(500);
+		
+		// Submit the thank you
+		try {
+			await vscode.commands.executeCommand('workbench.action.chat.submit');
+		} catch {
+			// Ignore
+		}
+		
+		await sleep(2000);
+		
+		// Restore editor focus
+		if (documentUriBefore && cursorPositionBefore) {
+			try {
+				const document = await vscode.workspace.openTextDocument(documentUriBefore);
+				const editor = await vscode.window.showTextDocument(document, {
+					preview: false,
+					preserveFocus: false
+				});
+				editor.selection = new vscode.Selection(cursorPositionBefore, cursorPositionBefore);
+				log('Restored editor focus after Copilot interaction');
+			} catch (e) {
+				log(`Failed to restore editor: ${e}`);
+			}
+		}
+		
+		// Close the chat after a moment
+		await sleep(2000);
+		try {
+			await vscode.commands.executeCommand('workbench.action.chat.close');
+		} catch {
+			// Ignore
+		}
+		
+		return copilotSuggestion;
+		
+	} catch (error) {
+		log(`Copilot extension request error: ${error}`);
+		return undefined;
+	}
+}
+
+// Generate extended project using AI and start diff mode
+async function generateExtendedProject(suggestion: string): Promise<boolean> {
+	if (!director) {
+		log('ERROR: Director not available for extension');
+		return false;
+	}
+	
+	const currentProblem = director.getCurrentProblem();
+	if (!currentProblem || currentProblem.type !== 'multi') {
+		log('ERROR: No current multi-file problem to extend');
+		return false;
+	}
+	
+	const apiKey = await promptForApiKey(currentProvider, false);
+	if (!apiKey) {
+		log('No API key for extension generation');
+		return false;
+	}
+	
+	log(`Generating extended project with suggestion: ${suggestion.substring(0, 50)}...`);
+	updateStatusBar(false, 'extending');
+	
+	try {
+		const extendedProject = await extendProject(
+			currentProvider, 
+			apiKey, 
+			currentProblem as MultiFileProblem, 
+			suggestion
+		);
+		
+		log(`Generated extended project: ${extendedProject.description}`);
+		log(`Files: ${extendedProject.files.map(f => f.filename).join(', ')}`);
+		
+		// Start diff mode in director
+		director.startDiffMode(extendedProject);
+		
+		updateStatusBar(true);
+		vscode.window.showInformationMessage(`🔄 Extending: ${extendedProject.description}`);
+		
+		return true;
+	} catch (error) {
+		log(`Failed to generate extended project: ${error}`);
+		updateStatusBar(false);
+		vscode.window.showErrorMessage(`Failed to extend project: ${error}`);
+		return false;
+	}
 }
 
 // Shared function to check and trigger GUI actions - used by both manual and auto-type
@@ -817,8 +997,8 @@ function stopAutoType(): void {
 }
 
 async function autoTypeNextChar(): Promise<void> {
-	// Skip if GUI action in progress or scene executing
-	if (isPerformingGuiAction || isExecutingScene) {
+	// Skip if GUI action in progress or scene executing or generating extension
+	if (isPerformingGuiAction || isExecutingScene || isGeneratingExtension) {
 		return;
 	}
 
@@ -836,6 +1016,31 @@ async function autoTypeNextChar(): Promise<void> {
 	const nextChar = director.getNextChar();
 	const progress = director.getProgress();
 
+	// Handle diff mode DELETE_LINE
+	if (nextChar === DELETE_LINE) {
+		log('Auto-type diff mode: Deleting line');
+		const lineNumber = editor.selection.active.line;
+		const line = editor.document.lineAt(lineNumber);
+		const range = line.rangeIncludingLineBreak;
+		await editor.edit(editBuilder => {
+			editBuilder.delete(range);
+		}, { undoStopBefore: false, undoStopAfter: false });
+		
+		// Check if we need to switch files
+		const diffFilename = director.getDiffFilename();
+		const currentFilename = path.basename(editor.document.uri.fsPath);
+		if (diffFilename && diffFilename !== currentFilename) {
+			stopAutoType();
+			await switchToDiffFile(diffFilename);
+			setTimeout(() => {
+				if (director?.getIsActive()) {
+					startAutoType();
+				}
+			}, 300);
+		}
+		return;
+	}
+
 	if (nextChar === NEXT_FILE) {
 		log('Auto-type: Moving to next file...');
 		stopAutoType(); // Pause while switching files
@@ -852,6 +1057,23 @@ async function autoTypeNextChar(): Promise<void> {
 		await executeScene(editor);
 		// Auto-type will resume after the scene loads (handled in executeScene)
 	} else {
+		// Check if we need to switch files for diff mode writing
+		if (director.isInDiffMode()) {
+			const diffFilename = director.getDiffFilename();
+			const currentFilename = path.basename(editor.document.uri.fsPath);
+			if (diffFilename && diffFilename !== currentFilename) {
+				log(`Auto-type: Switching to diff file: ${diffFilename}`);
+				stopAutoType();
+				await switchToDiffFile(diffFilename);
+				setTimeout(() => {
+					if (director?.getIsActive()) {
+						startAutoType();
+					}
+				}, 300);
+				return;
+			}
+		}
+		
 		// Insert the character
 		await editor.edit(editBuilder => {
 			editBuilder.insert(editor.selection.active, nextChar);
@@ -936,7 +1158,7 @@ async function createFirstFile(): Promise<void> {
 	isExecutingScene = false;
 }
 
-function updateStatusBar(active: boolean, state?: 'generating' | 'ready'): void {
+function updateStatusBar(active: boolean, state?: 'generating' | 'ready' | 'thinking' | 'extending'): void {
 	if (!statusBarItem) {
 		return;
 	}
@@ -944,7 +1166,21 @@ function updateStatusBar(active: boolean, state?: 'generating' | 'ready'): void 
 	if (state === 'generating') {
 		statusBarItem.text = '$(sync~spin) Generating...';
 		statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.prominentBackground');
-		statusBarItem.tooltip = 'Generating new project from Llama 3.1 8B...';
+		statusBarItem.tooltip = 'Generating new project...';
+		return;
+	}
+	
+	if (state === 'thinking') {
+		statusBarItem.text = '$(comment-discussion) Asking Copilot...';
+		statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.prominentBackground');
+		statusBarItem.tooltip = 'Asking Copilot for extension ideas...';
+		return;
+	}
+	
+	if (state === 'extending') {
+		statusBarItem.text = '$(sync~spin) Extending...';
+		statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.prominentBackground');
+		statusBarItem.tooltip = 'Generating extended project...';
 		return;
 	}
 	
@@ -985,6 +1221,12 @@ function registerTypeCommand(context: vscode.ExtensionContext): void {
 			log('Ignoring keystroke - copilot distraction in progress');
 			return;
 		}
+		
+		// Block keystrokes while generating extension
+		if (isGeneratingExtension) {
+			log('Ignoring keystroke - generating extension');
+			return;
+		}
 
 		log(`Type intercepted! User typed: "${args.text}"`);
 
@@ -1012,6 +1254,28 @@ function registerTypeCommand(context: vscode.ExtensionContext): void {
 
 			const nextChar = director!.getNextChar();
 			const progress = director!.getProgress();
+			
+			// Handle diff mode operations
+			if (nextChar === DELETE_LINE) {
+				log('Diff mode: Deleting line');
+				// Delete the current line
+				const lineNumber = currentEditor.selection.active.line;
+				const line = currentEditor.document.lineAt(lineNumber);
+				const range = line.rangeIncludingLineBreak;
+				await currentEditor.edit(editBuilder => {
+					editBuilder.delete(range);
+				}, { undoStopBefore: false, undoStopAfter: false });
+				
+				// Check if we need to switch files for next operation
+				const diffFilename = director!.getDiffFilename();
+				const currentFilename = path.basename(currentEditor.document.uri.fsPath);
+				if (diffFilename && diffFilename !== currentFilename) {
+					log(`Switching to diff file: ${diffFilename}`);
+					await switchToDiffFile(diffFilename);
+				}
+				return;
+			}
+			
 			log(`Next char: "${nextChar === '\n' ? '\\n' : nextChar}" (file ${progress.fileIndex + 1}/${progress.totalFiles}, char ${progress.current}/${progress.total})`);
 
 			if (nextChar === NEXT_FILE) {
@@ -1021,6 +1285,24 @@ function registerTypeCommand(context: vscode.ExtensionContext): void {
 				log('Script complete! Executing scene...');
 				await executeScene(currentEditor);
 			} else {
+				// Check if we need to switch files for diff mode
+				if (director!.isInDiffMode()) {
+					const diffFilename = director!.getDiffFilename();
+					const currentFilename = path.basename(currentEditor.document.uri.fsPath);
+					if (diffFilename && diffFilename !== currentFilename) {
+						log(`Switching to diff file: ${diffFilename}`);
+						await switchToDiffFile(diffFilename);
+						// Re-get editor after switch
+						const newEditor = vscode.window.activeTextEditor;
+						if (newEditor) {
+							await newEditor.edit(editBuilder => {
+								editBuilder.insert(newEditor.selection.active, nextChar);
+							}, { undoStopBefore: false, undoStopAfter: false });
+						}
+						return;
+					}
+				}
+				
 				// Insert the scripted character instead of user's keystroke
 				await currentEditor.edit(editBuilder => {
 					editBuilder.insert(currentEditor.selection.active, nextChar);
@@ -1051,6 +1333,43 @@ function registerTypeCommand(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push(typeCommandDisposable);
 	log('Type command registered successfully');
+}
+
+// Helper to switch to a diff file
+async function switchToDiffFile(filename: string): Promise<void> {
+	if (!workingDirectory) {
+		log('No working directory for diff file switch');
+		return;
+	}
+	
+	const filePath = path.join(workingDirectory, filename);
+	const fileUri = vscode.Uri.file(filePath);
+	
+	// Create file if it doesn't exist
+	if (!createdFiles.has(filename)) {
+		try {
+			await vscode.workspace.fs.writeFile(fileUri, new Uint8Array());
+			createdFiles.add(filename);
+		} catch (e) {
+			log(`Could not create file ${filename}: ${e}`);
+		}
+	}
+	
+	try {
+		const document = await vscode.workspace.openTextDocument(fileUri);
+		const editor = await vscode.window.showTextDocument(document, {
+			viewColumn: vscode.ViewColumn.One,
+			preview: false
+		});
+		
+		// Position cursor at start of file
+		const startPos = new vscode.Position(0, 0);
+		editor.selection = new vscode.Selection(startPos, startPos);
+		
+		log(`Switched to diff file: ${filename}`);
+	} catch (e) {
+		log(`Could not switch to diff file ${filename}: ${e}`);
+	}
 }
 
 function unregisterTypeCommand(): void {
@@ -1191,13 +1510,71 @@ async function executeScene(editor: vscode.TextEditor): Promise<void> {
 	
 	terminal.sendText(runCommand);
 
-	// Scene complete - deactivate performative mode
-	log('Scene complete! Deactivating performative mode.');
+	// Wait for the code to execute
+	await sleep(3000);
 	
-	// Stop auto-typing if active
+	// Stop auto-typing temporarily while we interact with Copilot
+	const wasAutoTyping = isAutoTypeMode;
 	if (isAutoTypeMode) {
 		stopAutoType();
 	}
+	
+	// Now start the extension workflow
+	log('Starting extension workflow - asking Copilot for ideas...');
+	isGeneratingExtension = true;
+	updateStatusBar(false, 'thinking');
+	
+	// Block user input during this process
+	vscode.window.showInformationMessage('🤔 Asking Copilot for extension ideas...');
+	
+	// Ask Copilot for an extension idea
+	const suggestion = await askCopilotForExtension();
+	
+	if (suggestion) {
+		log(`Got Copilot suggestion: ${suggestion.substring(0, 100)}...`);
+		
+		// Generate extended project using AI (this happens while user sees "thank you" in chat)
+		vscode.window.showInformationMessage('🔄 Generating extended project...');
+		
+		const success = await generateExtendedProject(suggestion);
+		
+		if (success) {
+			isGeneratingExtension = false;
+			isExecutingScene = false;
+			
+			// Focus back on the first file that needs modification
+			const diffFilename = director.getDiffFilename();
+			if (diffFilename && workingDirectory) {
+				const filePath = path.join(workingDirectory, diffFilename);
+				const fileUri = vscode.Uri.file(filePath);
+				try {
+					const document = await vscode.workspace.openTextDocument(fileUri);
+					const newEditor = await vscode.window.showTextDocument(document, {
+						viewColumn: vscode.ViewColumn.One,
+						preview: false
+					});
+					// Move cursor to beginning of file for deletion
+					const startPos = new vscode.Position(0, 0);
+					newEditor.selection = new vscode.Selection(startPos, startPos);
+					log(`Opened ${diffFilename} for diff-based editing`);
+				} catch (e) {
+					log(`Could not open diff file: ${e}`);
+				}
+			}
+			
+			// Resume auto-typing if it was active
+			if (wasAutoTyping) {
+				startAutoType();
+			}
+			
+			vscode.window.showInformationMessage('🚀 Extension ready! Continue typing to apply changes.');
+			return;
+		}
+	}
+	
+	// If extension workflow failed, fall back to normal completion
+	log('Extension workflow failed or cancelled - completing scene normally');
+	isGeneratingExtension = false;
 	
 	// Deactivate the director
 	if (director.getIsActive()) {
@@ -1208,6 +1585,7 @@ async function executeScene(editor: vscode.TextEditor): Promise<void> {
 	await restoreAutoFeatures();
 	unregisterTypeCommand();
 	updateStatusBar(false);
+	isExecutingScene = false;
 
 	// Now focus the terminal so user can interact with the running program
 	terminal.show(false); // false = take focus

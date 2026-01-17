@@ -1,18 +1,19 @@
 import * as https from 'https';
 import { MultiFileProblem, GENERATION_PROMPT } from './types';
 
-export async function generateWithGroq(apiKey: string): Promise<MultiFileProblem> {
+// Shared function to make Groq API calls
+async function callGroqAPI(apiKey: string, prompt: string): Promise<MultiFileProblem> {
     return new Promise((resolve, reject) => {
         const requestBody = JSON.stringify({
             model: 'llama-3.3-70b-versatile',
             messages: [
                 {
                     role: 'user',
-                    content: GENERATION_PROMPT
+                    content: prompt
                 }
             ],
             temperature: 0.3,
-            max_tokens: 4096,
+            max_tokens: 8192,
             response_format: { type: 'json_object' }
         });
 
@@ -43,7 +44,6 @@ export async function generateWithGroq(apiKey: string): Promise<MultiFileProblem
 
                     const response = JSON.parse(data);
                     
-                    // Extract the text content from Groq's OpenAI-compatible response
                     const choices = response.choices;
                     if (!choices || choices.length === 0) {
                         reject(new Error('No choices in Groq response'));
@@ -58,17 +58,14 @@ export async function generateWithGroq(apiKey: string): Promise<MultiFileProblem
 
                     const text = message.content;
                     
-                    // Parse the JSON from the text
                     let problem: MultiFileProblem;
                     try {
                         problem = JSON.parse(text);
                     } catch {
-                        // Try to extract JSON from markdown code blocks
                         const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
                         if (jsonMatch) {
                             problem = JSON.parse(jsonMatch[1].trim());
                         } else {
-                            // Try to find JSON object in the text
                             const jsonStart = text.indexOf('{');
                             const jsonEnd = text.lastIndexOf('}');
                             if (jsonStart !== -1 && jsonEnd !== -1) {
@@ -79,16 +76,13 @@ export async function generateWithGroq(apiKey: string): Promise<MultiFileProblem
                         }
                     }
 
-                    // Validate the problem structure
                     if (!problem.task_id || !problem.files || !Array.isArray(problem.files) || problem.files.length === 0) {
                         reject(new Error('Invalid problem structure from Groq'));
                         return;
                     }
 
-                    // Ensure type is set
                     problem.type = 'multi';
 
-                    // Ensure entry_file is set
                     if (!problem.entry_file) {
                         problem.entry_file = problem.files[problem.files.length - 1].filename;
                     }
@@ -107,4 +101,12 @@ export async function generateWithGroq(apiKey: string): Promise<MultiFileProblem
         req.write(requestBody);
         req.end();
     });
+}
+
+export async function generateWithGroq(apiKey: string): Promise<MultiFileProblem> {
+    return callGroqAPI(apiKey, GENERATION_PROMPT);
+}
+
+export async function extendWithGroq(apiKey: string, extensionPrompt: string): Promise<MultiFileProblem> {
+    return callGroqAPI(apiKey, extensionPrompt);
 }

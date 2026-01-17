@@ -4,6 +4,10 @@ export {
     MultiFileProblem, 
     AIProvider,
     GENERATION_PROMPT,
+    FileDiff,
+    ProjectDiff,
+    generateProjectDiff,
+    getExtensionPrompt,
     getProviderDisplayName,
     getProviderKeyPlaceholder,
     getProviderKeyUrl,
@@ -11,10 +15,10 @@ export {
     getProviderSettingKey
 } from './types';
 
-import { AIProvider, MultiFileProblem } from './types';
-import { generateWithGroq } from './groqGenerator';
-import { generateWithGemini } from './geminiGenerator';
-import { generateWithOpenAI } from './openaiGenerator';
+import { AIProvider, MultiFileProblem, getExtensionPrompt } from './types';
+import { generateWithGroq, extendWithGroq } from './groqGenerator';
+import { generateWithGemini, extendWithGemini } from './geminiGenerator';
+import { generateWithOpenAI, extendWithOpenAI } from './openaiGenerator';
 
 export async function generateMultiFileProblem(
     provider: AIProvider,
@@ -27,6 +31,26 @@ export async function generateMultiFileProblem(
             return generateWithGemini(apiKey);
         case 'openai':
             return generateWithOpenAI(apiKey);
+        default:
+            throw new Error(`Unknown provider: ${provider}`);
+    }
+}
+
+export async function extendProject(
+    provider: AIProvider,
+    apiKey: string,
+    currentProject: MultiFileProblem,
+    copilotSuggestion: string
+): Promise<MultiFileProblem> {
+    const prompt = getExtensionPrompt(currentProject, copilotSuggestion);
+    
+    switch (provider) {
+        case 'groq':
+            return extendWithGroq(apiKey, prompt);
+        case 'gemini':
+            return extendWithGemini(apiKey, prompt);
+        case 'openai':
+            return extendWithOpenAI(apiKey, prompt);
         default:
             throw new Error(`Unknown provider: ${provider}`);
     }

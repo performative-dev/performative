@@ -114,3 +114,115 @@ export function getProviderSettingKey(provider: AIProvider): string {
             return '';
     }
 }
+
+// Diff types for extension workflow
+export interface FileDiff {
+    filename: string;
+    action: 'delete' | 'create' | 'modify';
+    oldContent?: string;
+    newContent: string;
+}
+
+export interface ProjectDiff {
+    description: string;
+    fileDiffs: FileDiff[];
+}
+
+// Generate a diff between old and new project files
+export function generateProjectDiff(
+    oldFiles: FileContent[],
+    newFiles: FileContent[]
+): FileDiff[] {
+    const diffs: FileDiff[] = [];
+    const oldFileMap = new Map(oldFiles.map(f => [f.filename, f.content]));
+    const newFileMap = new Map(newFiles.map(f => [f.filename, f.content]));
+
+    // Check for modified or deleted files
+    for (const [filename, oldContent] of oldFileMap) {
+        const newContent = newFileMap.get(filename);
+        if (newContent === undefined) {
+            // File was deleted
+            diffs.push({
+                filename,
+                action: 'delete',
+                oldContent,
+                newContent: ''
+            });
+        } else if (newContent !== oldContent) {
+            // File was modified
+            diffs.push({
+                filename,
+                action: 'modify',
+                oldContent,
+                newContent
+            });
+        }
+        // If content is same, no diff needed
+    }
+
+    // Check for new files
+    for (const [filename, newContent] of newFileMap) {
+        if (!oldFileMap.has(filename)) {
+            diffs.push({
+                filename,
+                action: 'create',
+                newContent
+            });
+        }
+    }
+
+    return diffs;
+}
+
+// Prompt for extending an existing project based on Copilot's suggestion
+export function getExtensionPrompt(
+    currentProject: MultiFileProblem,
+    copilotSuggestion: string
+): string {
+    const filesDescription = currentProject.files
+        .map(f => `- ${f.filename}`)
+        .join('\n');
+
+    return `You are extending an existing Python project. Here is the current project:
+
+PROJECT: ${currentProject.description}
+TASK ID: ${currentProject.task_id}
+
+CURRENT FILES:
+${filesDescription}
+
+CURRENT CODE:
+${currentProject.files.map(f => `=== ${f.filename} ===\n${f.content}`).join('\n\n')}
+
+EXTENSION REQUEST FROM USER:
+${copilotSuggestion}
+
+Generate the UPDATED multi-file Python project as valid JSON.
+
+REQUIREMENTS:
+- Implement the extension described above
+- Keep existing functionality working
+- Use only Python standard library (no pip packages)
+- The main.py file must end with: print("Success")
+- Code must be complete and runnable
+- Include ALL files (both modified and unmodified)
+
+Return JSON in this exact format:
+{
+  "task_id": "${currentProject.task_id}",
+  "type": "multi",
+  "description": "Extended: ${currentProject.description} - [brief description of extension]",
+  "files": [
+    {"filename": "file.py", "content": "..."},
+    ...
+  ],
+  "entry_file": "main.py"
+}
+
+CRITICAL JSON RULES:
+- Use \\n for newlines inside content strings
+- Use \\" for quotes inside content strings  
+- Do NOT use triple quotes or multi-line strings
+- Content must be a single-line JSON string value
+- Return ONLY the JSON object, nothing else`;
+}
