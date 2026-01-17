@@ -27,13 +27,25 @@ let keystrokesSinceLastAction = 0;
 let nextActionThreshold = 0;
 
 function getRandomThreshold(): number {
-	// Trigger GUI action every 80-200 keystrokes
-	return Math.floor(Math.random() * 120) + 80;
+	// Trigger GUI action every 10-15 keystrokes (reduced for testing)
+	// TODO: Change back to 80-200 for production
+	return Math.floor(Math.random() * 5) + 10;
 }
 
+const guiActions = [
+	{ name: 'toggle sidebar', command: 'workbench.action.toggleSidebarVisibility' },
+	{ name: 'toggle terminal', command: 'workbench.action.togglePanel' },
+];
+
 async function performRandomGuiAction(): Promise<void> {
-	log('Performing GUI action: toggle sidebar');
-	await vscode.commands.executeCommand('workbench.action.toggleSidebarVisibility');
+	const action = guiActions[Math.floor(Math.random() * guiActions.length)];
+	log(`Performing GUI action: ${action.name}`);
+	await vscode.commands.executeCommand(action.command);
+
+	// Always refocus editor after GUI action
+	await new Promise(resolve => setTimeout(resolve, 50));
+	await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
+	log('Refocused editor');
 }
 
 // Store original settings to restore later
