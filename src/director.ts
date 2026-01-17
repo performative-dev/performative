@@ -1,21 +1,14 @@
 import { ProblemManager, Problem, isSingleFileProblem, isMultiFileProblem, FileContent } from './problemManager';
-import { FileDiff, generateProjectDiff, MultiFileProblem } from './types';
+import { generateProjectDiff, MultiFileProblem } from './types';
 
 export const EXECUTE_SCENE = 'EXECUTE_SCENE';
 export const NEXT_FILE = 'NEXT_FILE';
-export const DELETE_LINE = 'DELETE_LINE';
 export const SWITCH_TO_FILE = 'SWITCH_TO_FILE';
 
 interface FileScript {
     filename: string;
     content: string;
 }
-
-// Diff operation types
-type DiffOperation = 
-    | { type: 'delete_file'; filename: string; lineCount: number; currentLine: number }
-    | { type: 'write_file'; filename: string; content: string; charIndex: number }
-    | { type: 'create_file'; filename: string; content: string; charIndex: number };
 
 export class Director {
     private problemManager: ProblemManager;
@@ -34,10 +27,9 @@ export class Director {
     // Per-file buffer tracking for random switching
     private fileBufferIndices: number[] = [];
 
-    // Diff mode state
-    private isDiffMode: boolean = false;
-    private diffOperations: DiffOperation[] = [];
-    private currentDiffOpIndex: number = 0;
+    // Extension planning state (multi-file typing with file-level deletes/rewrites)
+    private pendingDeletes: string[] = [];
+    private rewriteFiles: Set<string> = new Set();
     private previousProject: MultiFileProblem | undefined;
 
     constructor(extensionPath: string) {
@@ -67,9 +59,8 @@ export class Director {
         this.currentProblem = problem;
         this.bufferIndex = 0;
         this.currentFileIndex = 0;
-        this.isDiffMode = false;
-        this.diffOperations = [];
-        this.currentDiffOpIndex = 0;
+        this.pendingDeletes = [];
+        this.rewriteFiles = new Set();
 
         if (isSingleFileProblem(problem)) {
             this.script = this.problemManager.getRunnableCodeForSingleFile(problem);
@@ -91,129 +82,58 @@ export class Director {
         return true;
     }
 
-    // Start diff mode with a new extended project
-    public startDiffMode(newProject: MultiFileProblem): void {
+    // Prepare multi-file extension typing plan for a new extended project
+    public startExtensionPlan(newProject: MultiFileProblem): void {
         if (!this.currentProblem || !isMultiFileProblem(this.currentProblem)) {
-            console.error('Cannot start diff mode without a current multi-file project');
+            console.error('Cannot start extension plan without a current multi-file project');
             return;
         }
 
         this.previousProject = this.currentProblem as MultiFileProblem;
         const oldFiles = this.previousProject.files;
-        const newFiles = newProject.files;
 
         // Generate diffs
-        const diffs = generateProjectDiff(oldFiles, newFiles);
+        const diffs = generateProjectDiff(oldFiles, newProject.files);
         console.log(`Generated ${diffs.length} file diffs`);
 
-        // Convert diffs to operations
-        this.diffOperations = [];
-        for (const diff of diffs) {
-            if (diff.action === 'delete') {
-                // Count lines in old content
-                const lineCount = (diff.oldContent?.split('\n').length || 1);
-                this.diffOperations.push({
-                    type: 'delete_file',
-                    filename: diff.filename,
-                    lineCount,
-                    currentLine: 0
-                });
-            } else if (diff.action === 'modify') {
-                // First delete all lines, then write new content
-                const lineCount = (diff.oldContent?.split('\n').length || 1);
-                this.diffOperations.push({
-                    type: 'delete_file',
-                    filename: diff.filename,
-                    lineCount,
-                    currentLine: 0
-                });
-                this.diffOperations.push({
-                    type: 'write_file',
-                    filename: diff.filename,
-                    content: diff.newContent,
-                    charIndex: 0
-                });
-            } else if (diff.action === 'create') {
-                this.diffOperations.push({
-                    type: 'create_file',
-                    filename: diff.filename,
-                    content: diff.newContent,
-                    charIndex: 0
-                });
-            }
-        }
-
-        this.isDiffMode = true;
-        this.currentDiffOpIndex = 0;
+        this.pendingDeletes = diffs
+            .filter(diff => diff.action === 'delete')
+            .map(diff => diff.filename);
+        this.rewriteFiles = new Set(
+            diffs.filter(diff => diff.action === 'modify').map(diff => diff.filename)
+        );
         this.currentProblem = newProject;
 
-        // Update file scripts for the new project
-        this.fileScripts = newProject.files.map((f: FileContent) => ({
-            filename: f.filename,
-            content: f.content
-        }));
+        const filesToType = diffs
+            .filter(diff => diff.action !== 'delete')
+            .map(diff => ({
+                filename: diff.filename,
+                content: diff.newContent ?? ''
+            }));
+        this.fileScripts = filesToType;
+        this.fileBufferIndices = this.fileScripts.map(() => 0);
+        this.currentFileIndex = 0;
+        this.script = this.fileScripts[0]?.content || '';
         this.entryFile = newProject.entry_file;
 
-        console.log(`Started diff mode with ${this.diffOperations.length} operations`);
+        console.log(`Prepared extension plan: ${this.fileScripts.length} files to type, ${this.pendingDeletes.length} deletes`);
     }
 
-    public isInDiffMode(): boolean {
-        return this.isDiffMode;
+    public consumePendingDeletes(): string[] {
+        const deletes = [...this.pendingDeletes];
+        this.pendingDeletes = [];
+        return deletes;
     }
 
-    public getCurrentDiffOperation(): DiffOperation | undefined {
-        if (!this.isDiffMode || this.currentDiffOpIndex >= this.diffOperations.length) {
-            return undefined;
-        }
-        return this.diffOperations[this.currentDiffOpIndex];
+    public shouldRewriteFile(filename: string): boolean {
+        return this.rewriteFiles.has(filename);
     }
 
-    public getNextDiffAction(): string {
-        const op = this.getCurrentDiffOperation();
-        if (!op) {
-            // Diff complete, switch to normal typing mode for any remaining content
-            this.isDiffMode = false;
-            // Reset file buffer indices for writing mode
-            this.fileBufferIndices = this.fileScripts.map(() => 0);
-            this.currentFileIndex = 0;
-            this.script = this.fileScripts[0]?.content || '';
-            return EXECUTE_SCENE; // All diffs applied
-        }
-
-        if (op.type === 'delete_file') {
-            if (op.currentLine < op.lineCount) {
-                op.currentLine++;
-                return DELETE_LINE;
-            } else {
-                // Move to next operation
-                this.currentDiffOpIndex++;
-                return this.getNextDiffAction();
-            }
-        } else if (op.type === 'write_file' || op.type === 'create_file') {
-            if (op.charIndex >= op.content.length) {
-                // Move to next operation
-                this.currentDiffOpIndex++;
-                return this.getNextDiffAction();
-            }
-            const char = op.content[op.charIndex];
-            op.charIndex++;
-            return char;
-        }
-
-        return EXECUTE_SCENE;
-    }
-
-    public getDiffFilename(): string | undefined {
-        const op = this.getCurrentDiffOperation();
-        return op?.filename;
+    public clearRewriteFlag(filename: string): void {
+        this.rewriteFiles.delete(filename);
     }
 
     public getNextChar(): string {
-        // If in diff mode, use diff-based character generation
-        if (this.isDiffMode) {
-            return this.getNextDiffAction();
-        }
-
         if (this.isMultiFile()) {
             // Use per-file buffer tracking
             const currentIndex = this.fileBufferIndices[this.currentFileIndex];
