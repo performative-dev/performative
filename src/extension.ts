@@ -25,6 +25,10 @@ let keystrokeQueue: Array<() => Promise<void>> = [];
 // GUI manipulation tracking
 let keystrokesSinceLastAction = 0;
 let nextActionThreshold = 0;
+let isPerformingGuiAction = false;
+
+// Scene execution tracking - ignore keystrokes while executing
+let isExecutingScene = false;
 
 function getRandomThreshold(): number {
 	// Trigger GUI action every 10-15 keystrokes (reduced for testing)
@@ -34,18 +38,58 @@ function getRandomThreshold(): number {
 
 const guiActions = [
 	{ name: 'toggle sidebar', command: 'workbench.action.toggleSidebarVisibility' },
-	{ name: 'toggle terminal', command: 'workbench.action.togglePanel' },
+	{ name: 'toggle terminal', command: 'custom:toggleTerminal' },
 ];
 
+// Track if terminal panel is visible
+let isTerminalVisible = false;
+
 async function performRandomGuiAction(): Promise<void> {
+	isPerformingGuiAction = true;
+
 	const action = guiActions[Math.floor(Math.random() * guiActions.length)];
 	log(`Performing GUI action: ${action.name}`);
-	await vscode.commands.executeCommand(action.command);
+
+	if (action.command === 'custom:toggleTerminal') {
+		// Custom terminal toggle that never takes focus
+		if (isTerminalVisible) {
+			await vscode.commands.executeCommand('workbench.action.togglePanel');
+			isTerminalVisible = false;
+		} else {
+			let terminal = vscode.window.activeTerminal;
+			if (!terminal) {
+				terminal = vscode.window.createTerminal('Performative');
+			}
+			terminal.show(true); // true = preserve focus
+			isTerminalVisible = true;
+		}
+	} else {
+		await vscode.commands.executeCommand(action.command);
+	}
 
 	// Always refocus editor after GUI action
 	await new Promise(resolve => setTimeout(resolve, 50));
 	await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
 	log('Refocused editor');
+
+	isPerformingGuiAction = false;
+
+	// Process any queued keystrokes that came in during the GUI action
+	if (keystrokeQueue.length > 0) {
+		log(`Processing ${keystrokeQueue.length} queued keystrokes after GUI action`);
+		processNextKeystroke();
+	}
+}
+
+// Shared function to check and trigger GUI actions - used by both manual and auto-type
+async function checkAndTriggerGuiAction(): Promise<void> {
+	keystrokesSinceLastAction++;
+	if (keystrokesSinceLastAction >= nextActionThreshold) {
+		await performRandomGuiAction();
+		keystrokesSinceLastAction = 0;
+		nextActionThreshold = getRandomThreshold();
+		log(`Next GUI action in ${nextActionThreshold} keystrokes`);
+	}
 }
 
 // Store original settings to restore later
@@ -72,7 +116,8 @@ function log(message: string): void {
 }
 
 async function processNextKeystroke(): Promise<void> {
-	if (isProcessingKeystroke || keystrokeQueue.length === 0) {
+	// Don't process while GUI action is in progress
+	if (isPerformingGuiAction || isProcessingKeystroke || keystrokeQueue.length === 0) {
 		return;
 	}
 	
@@ -414,6 +459,10 @@ export async function activate(context: vscode.ExtensionContext) {
 			director.toggle();
 			updateStatusBar(true);
 			await disableAutoFeatures();
+			// Initialize GUI action threshold
+			keystrokesSinceLastAction = 0;
+			nextActionThreshold = getRandomThreshold();
+			log(`Next GUI action in ${nextActionThreshold} keystrokes`);
 			await createFirstFile();
 		}
 
@@ -507,6 +556,16 @@ function stopAutoType(): void {
 }
 
 async function autoTypeNextChar(): Promise<void> {
+	// Skip if GUI action is in progress to prevent missed characters
+	if (isPerformingGuiAction) {
+		return;
+	}
+
+	// Skip if scene is executing
+	if (isExecutingScene) {
+		return;
+	}
+
 	if (!director || !director.getIsActive()) {
 		stopAutoType();
 		return;
@@ -541,6 +600,15 @@ async function autoTypeNextChar(): Promise<void> {
 		await editor.edit(editBuilder => {
 			editBuilder.insert(editor.selection.active, nextChar);
 		}, { undoStopBefore: false, undoStopAfter: false });
+
+		// Scroll to keep cursor visible
+		editor.revealRange(
+			new vscode.Range(editor.selection.active, editor.selection.active),
+			vscode.TextEditorRevealType.InCenterIfOutsideViewport
+		);
+
+		// Check if we should trigger a GUI action
+		await checkAndTriggerGuiAction();
 	}
 }
 
@@ -586,8 +654,11 @@ async function createFirstFile(): Promise<void> {
 	// Open the file in the editor
 	const document = await vscode.workspace.openTextDocument(fileUri);
 	await vscode.window.showTextDocument(document, { preview: false });
-	
+
 	log(`Created and opened: ${filePath}`);
+
+	// Scene is ready, allow keystrokes again
+	isExecutingScene = false;
 }
 
 function updateStatusBar(active: boolean, state?: 'generating' | 'ready'): void {
@@ -628,46 +699,60 @@ function registerTypeCommand(context: vscode.ExtensionContext): void {
 	}
 
 	typeCommandDisposable = vscode.commands.registerCommand('type', async (args: { text: string }) => {
+		// Ignore keystrokes while scene is executing
+		if (isExecutingScene) {
+			log('Ignoring keystroke - scene is executing');
+			return;
+		}
+
 		log(`Type intercepted! User typed: "${args.text}"`);
-		
+
 		if (!director || !director.getIsActive()) {
 			log('Director not active, passing through to default type');
 			await vscode.commands.executeCommand('default:type', args);
 			return;
 		}
 
+		// Always queue, even during GUI actions - we'll process after
 		const editor = vscode.window.activeTextEditor;
-		if (!editor) {
+		if (!editor && !isPerformingGuiAction) {
 			log('No active editor');
 			return;
 		}
 
 		// Queue the keystroke to prevent race conditions
 		keystrokeQueue.push(async () => {
+			// Get fresh editor reference in case it changed during GUI action
+			const currentEditor = vscode.window.activeTextEditor;
+			if (!currentEditor) {
+				log('No active editor when processing queued keystroke');
+				return;
+			}
+
 			const nextChar = director!.getNextChar();
 			const progress = director!.getProgress();
 			log(`Next char: "${nextChar === '\n' ? '\\n' : nextChar}" (file ${progress.fileIndex + 1}/${progress.totalFiles}, char ${progress.current}/${progress.total})`);
 
 			if (nextChar === NEXT_FILE) {
 				log('Current file complete! Moving to next file...');
-				await handleNextFile(editor);
+				await handleNextFile(currentEditor);
 			} else if (nextChar === EXECUTE_SCENE) {
 				log('Script complete! Executing scene...');
-				await executeScene(editor);
+				await executeScene(currentEditor);
 			} else {
 				// Insert the scripted character instead of user's keystroke
-				await editor.edit(editBuilder => {
-					editBuilder.insert(editor.selection.active, nextChar);
+				await currentEditor.edit(editBuilder => {
+					editBuilder.insert(currentEditor.selection.active, nextChar);
 				}, { undoStopBefore: false, undoStopAfter: false });
 
+				// Scroll to keep cursor visible
+				currentEditor.revealRange(
+					new vscode.Range(currentEditor.selection.active, currentEditor.selection.active),
+					vscode.TextEditorRevealType.InCenterIfOutsideViewport
+				);
+
 				// Check if we should trigger a GUI action
-				keystrokesSinceLastAction++;
-				if (keystrokesSinceLastAction >= nextActionThreshold) {
-					await performRandomGuiAction();
-					keystrokesSinceLastAction = 0;
-					nextActionThreshold = getRandomThreshold();
-					log(`Next GUI action in ${nextActionThreshold} keystrokes`);
-				}
+				await checkAndTriggerGuiAction();
 			}
 		});
 		
@@ -735,6 +820,7 @@ async function executeScene(editor: vscode.TextEditor): Promise<void> {
 	}
 
 	log('Executing scene...');
+	isExecutingScene = true;
 
 	// Save the document
 	await editor.document.save();
@@ -746,7 +832,8 @@ async function executeScene(editor: vscode.TextEditor): Promise<void> {
 		terminal = vscode.window.createTerminal('Performative');
 		log('Created new terminal');
 	}
-	terminal.show();
+	// Show terminal but preserve focus on editor to prevent keystrokes leaking in
+	terminal.show(true);
 
 	// Determine what to run
 	let runCommand: string;
