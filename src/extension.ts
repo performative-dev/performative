@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { Director, EXECUTE_SCENE, NEXT_FILE, DELETE_LINE } from './director';
+import { Director, EXECUTE_SCENE, NEXT_FILE, DELETE_LINE, CLEAR_FILE } from './director';
 import { 
 	generateMultiFileProblem,
 	extendProject,
@@ -1453,37 +1453,48 @@ async function autoTypeNextChar(): Promise<void> {
 			return;
 		}
 
-	const nextChar = director.getNextChar();
-	const progress = director.getProgress();
+		const nextChar = director.getNextChar();
+		const progress = director.getProgress();
 
-	// Handle diff mode DELETE_LINE
-	if (nextChar === DELETE_LINE) {
-		log('Auto-type diff mode: Deleting line');
-		// Always delete from line 0 (top of file) since we're deleting content sequentially
-		const line = editor.document.lineAt(0);
-		const range = line.rangeIncludingLineBreak;
-		await editor.edit(editBuilder => {
-			editBuilder.delete(range);
-		}, { undoStopBefore: false, undoStopAfter: false });
+		// Handle diff mode delete operations
+		if (nextChar === DELETE_LINE || nextChar === CLEAR_FILE) {
+			if (nextChar === CLEAR_FILE) {
+				log('Auto-type diff mode: Clearing file');
+				const fullRange = new vscode.Range(
+					editor.document.positionAt(0),
+					editor.document.positionAt(editor.document.getText().length)
+				);
+				await editor.edit(editBuilder => {
+					editBuilder.delete(fullRange);
+				}, { undoStopBefore: false, undoStopAfter: false });
+			} else {
+				log('Auto-type diff mode: Deleting line');
+				// Always delete from line 0 (top of file) since we're deleting content sequentially
+				const line = editor.document.lineAt(0);
+				const range = line.rangeIncludingLineBreak;
+				await editor.edit(editBuilder => {
+					editBuilder.delete(range);
+				}, { undoStopBefore: false, undoStopAfter: false });
+			}
 
-		// Keep cursor at start of file for next delete
-		const startPos = new vscode.Position(0, 0);
-		editor.selection = new vscode.Selection(startPos, startPos);
+			// Keep cursor at start of file for next delete
+			const startPos = new vscode.Position(0, 0);
+			editor.selection = new vscode.Selection(startPos, startPos);
 
-		// Check if we need to switch files
-		const diffFilename = director.getDiffFilename();
-		const currentFilename = path.basename(editor.document.uri.fsPath);
-		if (diffFilename && diffFilename !== currentFilename) {
-			stopAutoType();
-			await switchToDiffFile(diffFilename);
-			setTimeout(() => {
-				if (director?.getIsActive()) {
-					startAutoType();
-				}
-			}, 300);
+			// Check if we need to switch files
+			const diffFilename = director.getDiffFilename();
+			const currentFilename = path.basename(editor.document.uri.fsPath);
+			if (diffFilename && diffFilename !== currentFilename) {
+				stopAutoType();
+				await switchToDiffFile(diffFilename);
+				setTimeout(() => {
+					if (director?.getIsActive()) {
+						startAutoType();
+					}
+				}, 300);
+			}
+			return;
 		}
-		return;
-	}
 
 		if (nextChar === NEXT_FILE) {
 			log('Auto-type: Moving to next file...');
@@ -1728,14 +1739,25 @@ function registerTypeCommand(context: vscode.ExtensionContext): void {
 			const progress = director!.getProgress();
 			
 			// Handle diff mode operations
-			if (nextChar === DELETE_LINE) {
-				log('Diff mode: Deleting line');
-				// Always delete from line 0 (top of file) since we're deleting content sequentially
-				const line = currentEditor.document.lineAt(0);
-				const range = line.rangeIncludingLineBreak;
-				await currentEditor.edit(editBuilder => {
-					editBuilder.delete(range);
-				}, { undoStopBefore: false, undoStopAfter: false });
+			if (nextChar === DELETE_LINE || nextChar === CLEAR_FILE) {
+				if (nextChar === CLEAR_FILE) {
+					log('Diff mode: Clearing file');
+					const fullRange = new vscode.Range(
+						currentEditor.document.positionAt(0),
+						currentEditor.document.positionAt(currentEditor.document.getText().length)
+					);
+					await currentEditor.edit(editBuilder => {
+						editBuilder.delete(fullRange);
+					}, { undoStopBefore: false, undoStopAfter: false });
+				} else {
+					log('Diff mode: Deleting line');
+					// Always delete from line 0 (top of file) since we're deleting content sequentially
+					const line = currentEditor.document.lineAt(0);
+					const range = line.rangeIncludingLineBreak;
+					await currentEditor.edit(editBuilder => {
+						editBuilder.delete(range);
+					}, { undoStopBefore: false, undoStopAfter: false });
+				}
 
 				// Keep cursor at start of file for next delete
 				const startPos = new vscode.Position(0, 0);
