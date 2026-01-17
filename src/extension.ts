@@ -329,8 +329,10 @@ async function performRandomGuiAction(): Promise<void> {
 		// Focus the correct editor
 		const currentEditor = vscode.window.activeTextEditor;
 		if (currentEditor && currentEditor.document.uri.toString() === documentUriBefore.toString()) {
-			// Same editor still active, just restore cursor using offset
-			const restorePos = currentEditor.document.positionAt(cursorOffsetBefore);
+ 		// In diff mode, restore to current write position
+      	const restorePos = director?.isInDiffMode()                              
+      	  ? currentEditor.document.positionAt(director.getDiffWritePosition())                                                                   
+      	  : currentEditor.document.positionAt(cursorOffsetBefore);     
 			currentEditor.selection = new vscode.Selection(restorePos, restorePos);
 		} else {
 			// Different editor active, find and focus ours
@@ -344,7 +346,9 @@ async function performRandomGuiAction(): Promise<void> {
 				});
 				const editor = vscode.window.activeTextEditor;
 				if (editor) {
-					const restorePos = editor.document.positionAt(cursorOffsetBefore);
+					const restorePos = director?.isInDiffMode()
+					  ? editor.document.positionAt(director.getDiffWritePosition())
+					  : editor.document.positionAt(cursorOffsetBefore); 
 					editor.selection = new vscode.Selection(restorePos, restorePos);
 				}
 			}
@@ -1517,15 +1521,15 @@ async function autoTypeNextChar(): Promise<void> {
 					return;
 				}
 
-				// In diff mode, always append to end of document
-				const insertPosition = editor.document.positionAt(editor.document.getText().length);
+				// In diff mode, insert at tracked write position
+				const insertPosition = editor.document.positionAt(director.getDiffWritePosition());
 
 				await editor.edit(editBuilder => {
 					editBuilder.insert(insertPosition, nextChar);
 				}, { undoStopBefore: false, undoStopAfter: false });
 
-				// Move cursor to end after insert
-				const newCursorPos = editor.document.positionAt(editor.document.getText().length);
+				// Move cursor to after inserted char
+				const newCursorPos = editor.document.positionAt(director.getDiffWritePosition() + 1);
 				editor.selection = new vscode.Selection(newCursorPos, newCursorPos);
 				editor.revealRange(
 					new vscode.Range(newCursorPos, newCursorPos),
@@ -1770,26 +1774,26 @@ function registerTypeCommand(context: vscode.ExtensionContext): void {
 						// Re-get editor after switch
 						const newEditor = vscode.window.activeTextEditor;
 						if (newEditor) {
-							// In diff mode, always append to end of document
-							const insertPos = newEditor.document.positionAt(newEditor.document.getText().length);
+							// In diff mode, insert at tracked write position
+							const insertPos = newEditor.document.positionAt(director!.getDiffWritePosition());
 							await newEditor.edit(editBuilder => {
 								editBuilder.insert(insertPos, nextChar);
 							}, { undoStopBefore: false, undoStopAfter: false });
-							// Update cursor to end
-							const newCursorPos = newEditor.document.positionAt(newEditor.document.getText().length);
+							// Update cursor to after inserted char
+							const newCursorPos = newEditor.document.positionAt(director!.getDiffWritePosition() + 1);
 							newEditor.selection = new vscode.Selection(newCursorPos, newCursorPos);
 						}
 						return;
 					}
 
-					// In diff mode (same file), always append to end of document
-					const insertPos = currentEditor.document.positionAt(currentEditor.document.getText().length);
+					// In diff mode (same file), insert at tracked write position
+					const insertPos = currentEditor.document.positionAt(director!.getDiffWritePosition());
 					await currentEditor.edit(editBuilder => {
 						editBuilder.insert(insertPos, nextChar);
 					}, { undoStopBefore: false, undoStopAfter: false });
 
-					// Move cursor to end after insert
-					const newCursorPos = currentEditor.document.positionAt(currentEditor.document.getText().length);
+					// Move cursor to after inserted char
+					const newCursorPos = currentEditor.document.positionAt(director!.getDiffWritePosition() + 1);
 					currentEditor.selection = new vscode.Selection(newCursorPos, newCursorPos);
 					currentEditor.revealRange(
 						new vscode.Range(newCursorPos, newCursorPos),
