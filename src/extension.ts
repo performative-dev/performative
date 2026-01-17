@@ -39,6 +39,7 @@ function getRandomThreshold(): number {
 const guiActions = [
 	{ name: 'toggle sidebar', command: 'workbench.action.toggleSidebarVisibility' },
 	{ name: 'toggle terminal', command: 'custom:toggleTerminal' },
+	{ name: 'switch file', command: 'custom:switchFile' },
 ];
 
 // Track if terminal panel is visible
@@ -63,6 +64,15 @@ async function performRandomGuiAction(): Promise<void> {
 			terminal.show(true); // true = preserve focus
 			isTerminalVisible = true;
 		}
+	} else if (action.command === 'custom:switchFile') {
+		// Random file switch for multi-file projects
+		if (director && director.isMultiFile() && !director.isCurrentFileComplete()) {
+			const editor = vscode.window.activeTextEditor;
+			if (editor) {
+				await handleRandomFileSwitch(editor);
+			}
+		}
+		// If not multi-file or current file is complete, just skip this action
 	} else {
 		await vscode.commands.executeCommand(action.command);
 	}
@@ -97,6 +107,9 @@ let originalSettings: Map<string, unknown> = new Map();
 
 // Track the working directory for multi-file projects
 let workingDirectory: string | undefined;
+
+// Track which files have been created (for random file switching)
+let createdFiles: Set<string> = new Set();
 
 // Auto-type mode variables
 let autoTypeInterval: NodeJS.Timeout | undefined;
@@ -556,13 +569,8 @@ function stopAutoType(): void {
 }
 
 async function autoTypeNextChar(): Promise<void> {
-	// Skip if GUI action is in progress to prevent missed characters
-	if (isPerformingGuiAction) {
-		return;
-	}
-
-	// Skip if scene is executing
-	if (isExecutingScene) {
+	// Skip if GUI action in progress or scene executing
+	if (isPerformingGuiAction || isExecutingScene) {
 		return;
 	}
 
@@ -620,6 +628,9 @@ async function createFirstFile(): Promise<void> {
 
 	log('Creating first file for the scene...');
 
+	// Reset created files tracking for new scene
+	createdFiles.clear();
+
 	// Determine the working directory (use workspace folder or temp)
 	const workspaceFolders = vscode.workspace.workspaceFolders;
 	if (workspaceFolders && workspaceFolders.length > 0) {
@@ -647,10 +658,11 @@ async function createFirstFile(): Promise<void> {
 	// Create and open the file
 	const filePath = path.join(workingDirectory, filename);
 	const fileUri = vscode.Uri.file(filePath);
-	
+
 	// Create an empty file
 	await vscode.workspace.fs.writeFile(fileUri, new Uint8Array());
-	
+	createdFiles.add(filename);
+
 	// Open the file in the editor
 	const document = await vscode.workspace.openTextDocument(fileUri);
 	await vscode.window.showTextDocument(document, { preview: false });
@@ -701,7 +713,7 @@ function registerTypeCommand(context: vscode.ExtensionContext): void {
 	typeCommandDisposable = vscode.commands.registerCommand('type', async (args: { text: string }) => {
 		// Ignore keystrokes while scene is executing
 		if (isExecutingScene) {
-			log('Ignoring keystroke - scene is executing');
+			log('Ignoring keystroke - scene executing');
 			return;
 		}
 
@@ -804,13 +816,59 @@ async function handleNextFile(currentEditor: vscode.TextEditor): Promise<void> {
 	const newFilePath = path.join(workingDirectory, nextFile.filename);
 	const newFileUri = vscode.Uri.file(newFilePath);
 
-	// Create and open the new file
-	await vscode.workspace.fs.writeFile(newFileUri, new Uint8Array());
+	// Create or open the file
+	const fileExists = createdFiles.has(nextFile.filename);
+	if (!fileExists) {
+		await vscode.workspace.fs.writeFile(newFileUri, new Uint8Array());
+		createdFiles.add(nextFile.filename);
+	}
 	const document = await vscode.workspace.openTextDocument(newFileUri);
 	await vscode.window.showTextDocument(document, { preview: false });
 
 	const progress = director.getProgress();
 	vscode.window.showInformationMessage(`📄 File ${progress.fileIndex + 1}/${progress.totalFiles}: ${nextFile.filename}`);
+}
+
+async function handleRandomFileSwitch(currentEditor: vscode.TextEditor): Promise<void> {
+	if (!director || !director.isMultiFile()) {
+		log('Random file switch: Not a multi-file project');
+		return;
+	}
+
+	// Save the current file
+	await currentEditor.document.save();
+	log('Current file saved before random switch');
+
+	// Switch to a random incomplete file
+	const newFile = director.switchToRandomIncompleteFile();
+	if (!newFile) {
+		log('No other incomplete files to switch to');
+		return;
+	}
+
+	log(`Random switch to file: ${newFile.filename}`);
+
+	// Determine the working directory
+	if (!workingDirectory) {
+		const currentDir = path.dirname(currentEditor.document.uri.fsPath);
+		workingDirectory = currentDir;
+	}
+
+	// Create the file path
+	const filePath = path.join(workingDirectory, newFile.filename);
+	const fileUri = vscode.Uri.file(filePath);
+
+	// Create or open the file
+	const fileExists = createdFiles.has(newFile.filename);
+	if (!fileExists) {
+		await vscode.workspace.fs.writeFile(fileUri, new Uint8Array());
+		createdFiles.add(newFile.filename);
+	}
+	const document = await vscode.workspace.openTextDocument(fileUri);
+	await vscode.window.showTextDocument(document, { preview: false });
+
+	const progress = director.getProgress();
+	log(`Now on file ${progress.fileIndex + 1}/${progress.totalFiles}: ${newFile.filename} (char ${progress.current}/${progress.total})`);
 }
 
 async function executeScene(editor: vscode.TextEditor): Promise<void> {
