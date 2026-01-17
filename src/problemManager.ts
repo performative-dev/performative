@@ -134,4 +134,16 @@ except Exception as e:
     public getProblemCount(): number {
         return this.problems.length;
     }
+
+    public setGeneratedProblem(problem: Problem): void {
+        // Insert the generated problem at the beginning
+        this.problems.unshift(problem);
+        console.log(`Added generated problem: ${problem.task_id}`);
+    }
+
+    public setActiveGeneratedProblem(problem: Problem): void {
+        // Replace all problems with just this one generated problem
+        this.problems = [problem];
+        console.log(`Set active generated problem: ${problem.task_id}`);
+    }
 }

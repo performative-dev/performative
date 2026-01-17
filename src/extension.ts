@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { Director, EXECUTE_SCENE, NEXT_FILE } from './director';
+import { generateMultiFileProblem } from './groqGenerator';
 
 let director: Director | undefined;
 let typeCommandDisposable: vscode.Disposable | undefined;
@@ -23,6 +24,9 @@ let workingDirectory: string | undefined;
 let autoTypeInterval: NodeJS.Timeout | undefined;
 let isAutoTypeMode = false;
 let autoTypeSpeed = 50; // milliseconds between characters
+
+// Track if we've generated a problem for this session
+let hasGeneratedProblem = false;
 
 function log(message: string): void {
 	const timestamp = new Date().toISOString();
@@ -111,7 +115,99 @@ async function restoreAutoFeatures(): Promise<void> {
 	log('Auto-features restored');
 }
 
-export function activate(context: vscode.ExtensionContext) {
+async function promptForApiKey(forcePrompt: boolean = false): Promise<string | undefined> {
+	const config = vscode.workspace.getConfiguration('performative');
+	
+	if (!forcePrompt) {
+		const apiKey = config.get<string>('groqApiKey') || process.env.GROQ_API_KEY;
+		if (apiKey) {
+			log('API key found in settings or environment');
+			return apiKey;
+		}
+	}
+
+	// Prompt the user for API key
+	const result = await vscode.window.showInputBox({
+		title: forcePrompt ? 'Enter New Groq API Key' : 'Groq API Key Required',
+		prompt: forcePrompt 
+			? 'Your previous API key failed. Enter a new Groq API key. Get one at https://console.groq.com/keys'
+			: 'Enter your Groq API key to generate dynamic Python projects. Get one at https://console.groq.com/keys',
+		placeHolder: 'gsk_...',
+		password: true,
+		ignoreFocusOut: true
+	});
+
+	if (result) {
+		// Store the API key in settings
+		await config.update('groqApiKey', result, vscode.ConfigurationTarget.Global);
+		log('API key stored in settings');
+		return result;
+	}
+
+	return undefined;
+}
+
+async function generateProblem(forceNewKey: boolean = false): Promise<boolean> {
+	const apiKey = await promptForApiKey(forceNewKey);
+
+	if (!apiKey) {
+		log('No Groq API key provided. Cannot generate problem.');
+		vscode.window.showWarningMessage('No API key provided. Please set your Groq API key to use Performative Developer.');
+		return false;
+	}
+
+	log('Generating new multi-file problem from Groq API (Llama 3.1 8B)...');
+	updateStatusBar(false, 'generating');
+
+	try {
+		const problem = await generateMultiFileProblem(apiKey);
+		log(`Generated problem: ${problem.task_id} - ${problem.description}`);
+		log(`Files: ${problem.files.map(f => f.filename).join(', ')}`);
+
+		if (director) {
+			director.setGeneratedProblem(problem);
+			hasGeneratedProblem = true;
+			updateStatusBar(false);
+			vscode.window.showInformationMessage(`🤖 Generated: ${problem.description}`);
+			return true;
+		}
+	} catch (error) {
+		const errorMessage = String(error);
+		log(`Failed to generate problem from Groq: ${errorMessage}`);
+		updateStatusBar(false);
+		
+		// Check if it's an auth/quota error
+		const isAuthError = errorMessage.includes('401') || 
+			errorMessage.includes('403') || 
+			errorMessage.includes('invalid') ||
+			errorMessage.includes('quota') ||
+			errorMessage.includes('rate');
+		
+		if (isAuthError) {
+			const action = await vscode.window.showErrorMessage(
+				`API Error: ${errorMessage}`,
+				'Enter New API Key',
+				'Cancel'
+			);
+			
+			if (action === 'Enter New API Key') {
+				// Clear the old key and retry with a new one
+				const config = vscode.workspace.getConfiguration('performative');
+				await config.update('groqApiKey', undefined, vscode.ConfigurationTarget.Global);
+				return generateProblem(true);
+			}
+		} else {
+			vscode.window.showErrorMessage(`Failed to generate: ${errorMessage}`);
+		}
+	}
+
+	return false;
+}
+
+// Track if we're currently generating
+let isGenerating = false;
+
+export async function activate(context: vscode.ExtensionContext) {
 	// Create output channel for debug messages
 	outputChannel = vscode.window.createOutputChannel('Performative Developer');
 	context.subscriptions.push(outputChannel);
@@ -130,6 +226,18 @@ export function activate(context: vscode.ExtensionContext) {
 	log(`Extension path: ${context.extensionPath}`);
 	director = new Director(context.extensionPath);
 
+	// Generate a fresh problem from Groq on activation
+	isGenerating = true;
+	const success = await generateProblem();
+	isGenerating = false;
+	
+	if (success) {
+		log('Successfully generated problem from Groq - Ready to perform!');
+		vscode.window.showInformationMessage('🎬 Performative Developer ready! Toggle mode to start typing.');
+	} else {
+		log('Failed to generate problem - extension not ready');
+	}
+
 	// Register the toggle command
 	const toggleCommand = vscode.commands.registerCommand('performative.toggle', async () => {
 		log('Toggle command triggered');
@@ -137,6 +245,17 @@ export function activate(context: vscode.ExtensionContext) {
 		if (!director) {
 			log('ERROR: Director not initialized');
 			return;
+		}
+
+		// Check if we have a generated problem
+		if (!hasGeneratedProblem) {
+			vscode.window.showWarningMessage('No problem generated yet. Please set your Groq API key first.');
+			isGenerating = true;
+			const success = await generateProblem();
+			isGenerating = false;
+			if (!success) {
+				return;
+			}
 		}
 
 		const isActive = director.toggle();
@@ -168,6 +287,17 @@ export function activate(context: vscode.ExtensionContext) {
 		if (!director) {
 			log('ERROR: Director not initialized');
 			return;
+		}
+
+		// Check if we have a generated problem
+		if (!hasGeneratedProblem) {
+			vscode.window.showWarningMessage('No problem generated yet. Please set your Groq API key first.');
+			isGenerating = true;
+			const success = await generateProblem();
+			isGenerating = false;
+			if (!success) {
+				return;
+			}
 		}
 
 		// If not active, activate first
@@ -210,6 +340,35 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 
 	context.subscriptions.push(speedUpCommand, slowDownCommand);
+
+	// Register regenerate command
+	const regenerateCommand = vscode.commands.registerCommand('performative.regenerate', async () => {
+		log('Regenerate command triggered');
+		
+		// Stop any current auto-typing
+		if (isAutoTypeMode) {
+			stopAutoType();
+		}
+		
+		// Deactivate if active
+		if (director?.getIsActive()) {
+			director.toggle();
+			updateStatusBar(false);
+			await restoreAutoFeatures();
+			unregisterTypeCommand();
+		}
+
+		// Generate new problem
+		const success = await generateProblem();
+		if (success) {
+			vscode.window.showInformationMessage('🔄 New project generated! Toggle mode to start.');
+		} else {
+			vscode.window.showErrorMessage('Failed to generate new project. Check your API key.');
+		}
+		updateStatusBar(false);
+	});
+
+	context.subscriptions.push(regenerateCommand);
 
 	log('Extension activated successfully');
 }
@@ -322,8 +481,15 @@ async function createFirstFile(): Promise<void> {
 	log(`Created and opened: ${filePath}`);
 }
 
-function updateStatusBar(active: boolean): void {
+function updateStatusBar(active: boolean, state?: 'generating' | 'ready'): void {
 	if (!statusBarItem) {
+		return;
+	}
+	
+	if (state === 'generating') {
+		statusBarItem.text = '$(sync~spin) Generating...';
+		statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.prominentBackground');
+		statusBarItem.tooltip = 'Generating new project from Llama 3.1 8B...';
 		return;
 	}
 	
@@ -471,7 +637,6 @@ async function executeScene(editor: vscode.TextEditor): Promise<void> {
 		// For multi-file projects, run the entry file from the working directory
 		const entryFile = director.getEntryFile();
 		if (workingDirectory) {
-			const entryPath = path.join(workingDirectory, entryFile);
 			runCommand = `cd "${workingDirectory}" && python3 "${entryFile}"`;
 		} else {
 			runCommand = `python3 "${entryFile}"`;
@@ -486,32 +651,26 @@ async function executeScene(editor: vscode.TextEditor): Promise<void> {
 	
 	terminal.sendText(runCommand);
 
-	// Wait a moment for the script to execute, then clean up and start next scene
-	const wasAutoTyping = isAutoTypeMode;
+	// Scene complete - deactivate performative mode
+	log('Scene complete! Deactivating performative mode.');
 	
-	setTimeout(async () => {
-		log('Cleaning up and loading next scene...');
-		
-		// Close all editors
-		await vscode.commands.executeCommand('workbench.action.closeAllEditors');
-
-		// Reset working directory
-		workingDirectory = undefined;
-
-		// Load the next problem
-		const success = director?.startNewScene();
-		log(`New scene loaded: ${success}`);
-
-		// Create the first file for the new scene
-		await createFirstFile();
-
-		// Resume auto-type if it was active
-		if (wasAutoTyping && director?.getIsActive()) {
-			setTimeout(() => {
-				startAutoType();
-			}, 1000); // Small delay before resuming
-		}
-	}, 3000); // 3 second delay to see the output
+	// Stop auto-typing if active
+	if (isAutoTypeMode) {
+		stopAutoType();
+	}
+	
+	// Deactivate the director
+	if (director.getIsActive()) {
+		director.toggle();
+	}
+	
+	// Restore settings
+	await restoreAutoFeatures();
+	unregisterTypeCommand();
+	updateStatusBar(false);
+	
+	vscode.window.showInformationMessage('🎉 Scene complete! Code executed in terminal. Use Cmd+Shift+G to generate a new project.');
+}
 }
 
 export async function deactivate() {
