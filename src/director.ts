@@ -190,6 +190,19 @@ export class Director {
         };
     }
 
+    public isAtLineEnd(): boolean {
+        // Check if the last character we typed was a newline (safe to switch files)
+        const current = this.isMultiFile()
+            ? this.fileBufferIndices[this.currentFileIndex]
+            : this.bufferIndex;
+
+        if (current === 0) {
+            return true; // Start of file is safe
+        }
+
+        return this.script[current - 1] === '\n';
+    }
+
     public setGeneratedProblem(problem: Problem): void {
         // Set the generated problem in the problem manager
         this.problemManager.setActiveGeneratedProblem(problem);

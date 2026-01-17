@@ -30,6 +30,9 @@ let isPerformingGuiAction = false;
 // Scene execution tracking - ignore keystrokes while executing
 let isExecutingScene = false;
 
+// Pending file switch - execute at next newline
+let pendingFileSwitch = false;
+
 function getRandomThreshold(): number {
 	// Trigger GUI action every 10-15 keystrokes (reduced for testing)
 	// TODO: Change back to 80-200 for production
@@ -40,6 +43,9 @@ const guiActions = [
 	{ name: 'toggle sidebar', command: 'workbench.action.toggleSidebarVisibility' },
 	{ name: 'toggle terminal', command: 'custom:toggleTerminal' },
 	{ name: 'switch file', command: 'custom:switchFile' },
+	// Layout actions - need special handling to preserve cursor state
+	{ name: 'single layout', command: 'custom:singleLayout' },
+	{ name: 'two columns', command: 'custom:twoColumns' },
 ];
 
 // Track if terminal panel is visible
@@ -50,6 +56,11 @@ async function performRandomGuiAction(): Promise<void> {
 
 	const action = guiActions[Math.floor(Math.random() * guiActions.length)];
 	log(`Performing GUI action: ${action.name}`);
+
+	// Capture current editor state BEFORE any action
+	const editorBefore = vscode.window.activeTextEditor;
+	const documentUriBefore = editorBefore?.document.uri;
+	const cursorPositionBefore = editorBefore?.selection.active;
 
 	if (action.command === 'custom:toggleTerminal') {
 		// Custom terminal toggle that never takes focus
@@ -65,28 +76,58 @@ async function performRandomGuiAction(): Promise<void> {
 			isTerminalVisible = true;
 		}
 	} else if (action.command === 'custom:switchFile') {
-		// Random file switch for multi-file projects
+		// Schedule a file switch for next newline
 		if (director && director.isMultiFile() && !director.isCurrentFileComplete()) {
-			const editor = vscode.window.activeTextEditor;
-			if (editor) {
-				await handleRandomFileSwitch(editor);
-			}
+			pendingFileSwitch = true;
+			log('File switch scheduled for next newline');
 		}
-		// If not multi-file or current file is complete, just skip this action
+	} else if (action.command === 'custom:singleLayout') {
+		// Join all editor groups back to single column
+		await vscode.commands.executeCommand('workbench.action.joinAllGroups');
+	} else if (action.command === 'custom:twoColumns') {
+		const currentGroups = vscode.window.tabGroups.all.length;
+		
+		if (currentGroups >= 3) {
+			log('Already at max editor groups (3)');
+		} else {
+			// Simply move current editor to next group - this creates a split
+			// and the original group shows the next tab in line
+			await vscode.commands.executeCommand('workbench.action.moveEditorToNextGroup');
+			log(`Moved to new group`);
+		}
 	} else {
 		await vscode.commands.executeCommand(action.command);
 	}
 
-	// Always refocus editor after GUI action
-	await new Promise(resolve => setTimeout(resolve, 50));
-	await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
-	log('Refocused editor');
+	// Quick restore of editor focus and cursor (no long delays)
+	if (documentUriBefore && cursorPositionBefore) {
+		// Focus the correct editor
+		const currentEditor = vscode.window.activeTextEditor;
+		if (currentEditor && currentEditor.document.uri.toString() === documentUriBefore.toString()) {
+			// Same editor still active, just restore cursor
+			currentEditor.selection = new vscode.Selection(cursorPositionBefore, cursorPositionBefore);
+		} else {
+			// Different editor active, find and focus ours
+			const editors = vscode.window.visibleTextEditors;
+			const targetEditor = editors.find(e => e.document.uri.toString() === documentUriBefore.toString());
+			if (targetEditor) {
+				await vscode.window.showTextDocument(targetEditor.document, {
+					viewColumn: targetEditor.viewColumn,
+					preserveFocus: false,
+					preview: false
+				});
+				const editor = vscode.window.activeTextEditor;
+				if (editor) {
+					editor.selection = new vscode.Selection(cursorPositionBefore, cursorPositionBefore);
+				}
+			}
+		}
+	}
 
 	isPerformingGuiAction = false;
 
-	// Process any queued keystrokes that came in during the GUI action
+	// Process any queued keystrokes
 	if (keystrokeQueue.length > 0) {
-		log(`Processing ${keystrokeQueue.length} queued keystrokes after GUI action`);
 		processNextKeystroke();
 	}
 }
@@ -615,6 +656,20 @@ async function autoTypeNextChar(): Promise<void> {
 			vscode.TextEditorRevealType.InCenterIfOutsideViewport
 		);
 
+		// If we just typed a newline and there's a pending file switch, do it now
+		if (nextChar === '\n' && pendingFileSwitch && director.isMultiFile()) {
+			pendingFileSwitch = false;
+			log('Executing pending file switch after newline');
+			stopAutoType();
+			await handleRandomFileSwitch(editor);
+			setTimeout(() => {
+				if (director?.getIsActive()) {
+					startAutoType();
+				}
+			}, 300);
+			return;
+		}
+
 		// Check if we should trigger a GUI action
 		await checkAndTriggerGuiAction();
 	}
@@ -628,8 +683,9 @@ async function createFirstFile(): Promise<void> {
 
 	log('Creating first file for the scene...');
 
-	// Reset created files tracking for new scene
+	// Reset state for new scene
 	createdFiles.clear();
+	pendingFileSwitch = false;
 
 	// Determine the working directory (use workspace folder or temp)
 	const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -763,6 +819,14 @@ function registerTypeCommand(context: vscode.ExtensionContext): void {
 					vscode.TextEditorRevealType.InCenterIfOutsideViewport
 				);
 
+				// If we just typed a newline and there's a pending file switch, do it now
+				if (nextChar === '\n' && pendingFileSwitch && director!.isMultiFile()) {
+					pendingFileSwitch = false;
+					log('Executing pending file switch after newline (manual)');
+					await handleRandomFileSwitch(currentEditor);
+					return;
+				}
+
 				// Check if we should trigger a GUI action
 				await checkAndTriggerGuiAction();
 			}
@@ -791,11 +855,8 @@ async function handleNextFile(currentEditor: vscode.TextEditor): Promise<void> {
 		return;
 	}
 
-	// Save the current file
 	await currentEditor.document.save();
-	log('Current file saved');
 
-	// Get the next file info
 	const nextFile = director.advanceToNextFile();
 	if (!nextFile) {
 		log('ERROR: No next file available');
@@ -804,71 +865,74 @@ async function handleNextFile(currentEditor: vscode.TextEditor): Promise<void> {
 
 	log(`Opening next file: ${nextFile.filename}`);
 
-	// Determine the working directory
 	if (!workingDirectory) {
-		// Use the directory of the current file, or workspace folder
-		const currentDir = path.dirname(currentEditor.document.uri.fsPath);
-		workingDirectory = currentDir;
-		log(`Set working directory: ${workingDirectory}`);
+		workingDirectory = path.dirname(currentEditor.document.uri.fsPath);
 	}
 
-	// Create the new file path
-	const newFilePath = path.join(workingDirectory, nextFile.filename);
-	const newFileUri = vscode.Uri.file(newFilePath);
+	const filePath = path.join(workingDirectory, nextFile.filename);
+	const fileUri = vscode.Uri.file(filePath);
 
-	// Create or open the file
-	const fileExists = createdFiles.has(nextFile.filename);
-	if (!fileExists) {
-		await vscode.workspace.fs.writeFile(newFileUri, new Uint8Array());
+	if (!createdFiles.has(nextFile.filename)) {
+		await vscode.workspace.fs.writeFile(fileUri, new Uint8Array());
 		createdFiles.add(nextFile.filename);
 	}
-	const document = await vscode.workspace.openTextDocument(newFileUri);
-	await vscode.window.showTextDocument(document, { preview: false });
 
+	// Always open in ViewColumn.One
+	const document = await vscode.workspace.openTextDocument(fileUri);
+	const editor = await vscode.window.showTextDocument(document, {
+		viewColumn: vscode.ViewColumn.One,
+		preview: false
+	});
+
+	// Position cursor using director's tracked position
 	const progress = director.getProgress();
+	const cursorPos = editor.document.positionAt(progress.current);
+	editor.selection = new vscode.Selection(cursorPos, cursorPos);
+	editor.revealRange(new vscode.Range(cursorPos, cursorPos));
+
 	vscode.window.showInformationMessage(`📄 File ${progress.fileIndex + 1}/${progress.totalFiles}: ${nextFile.filename}`);
 }
 
 async function handleRandomFileSwitch(currentEditor: vscode.TextEditor): Promise<void> {
 	if (!director || !director.isMultiFile()) {
-		log('Random file switch: Not a multi-file project');
 		return;
 	}
 
-	// Save the current file
 	await currentEditor.document.save();
-	log('Current file saved before random switch');
 
-	// Switch to a random incomplete file
 	const newFile = director.switchToRandomIncompleteFile();
 	if (!newFile) {
-		log('No other incomplete files to switch to');
 		return;
 	}
 
 	log(`Random switch to file: ${newFile.filename}`);
 
-	// Determine the working directory
 	if (!workingDirectory) {
-		const currentDir = path.dirname(currentEditor.document.uri.fsPath);
-		workingDirectory = currentDir;
+		workingDirectory = path.dirname(currentEditor.document.uri.fsPath);
 	}
 
-	// Create the file path
 	const filePath = path.join(workingDirectory, newFile.filename);
 	const fileUri = vscode.Uri.file(filePath);
 
-	// Create or open the file
-	const fileExists = createdFiles.has(newFile.filename);
-	if (!fileExists) {
+	if (!createdFiles.has(newFile.filename)) {
 		await vscode.workspace.fs.writeFile(fileUri, new Uint8Array());
 		createdFiles.add(newFile.filename);
 	}
-	const document = await vscode.workspace.openTextDocument(fileUri);
-	await vscode.window.showTextDocument(document, { preview: false });
 
+	// Always open in ViewColumn.One to ensure we're typing in the main editor
+	const document = await vscode.workspace.openTextDocument(fileUri);
+	const editor = await vscode.window.showTextDocument(document, {
+		viewColumn: vscode.ViewColumn.One,
+		preview: false
+	});
+
+	// Position cursor using director's tracked position for this file
 	const progress = director.getProgress();
-	log(`Now on file ${progress.fileIndex + 1}/${progress.totalFiles}: ${newFile.filename} (char ${progress.current}/${progress.total})`);
+	const cursorPos = editor.document.positionAt(progress.current);
+	editor.selection = new vscode.Selection(cursorPos, cursorPos);
+	editor.revealRange(new vscode.Range(cursorPos, cursorPos));
+
+	log(`Now on file ${progress.fileIndex + 1}/${progress.totalFiles}: ${newFile.filename} at char ${progress.current}`);
 }
 
 async function executeScene(editor: vscode.TextEditor): Promise<void> {
