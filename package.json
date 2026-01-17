@@ -18,6 +18,35 @@
       {
         "command": "performative.toggle",
         "title": "Performative: Toggle Performance Mode"
+      },
+      {
+        "command": "performative.autoType",
+        "title": "Performative: Start/Stop Auto-Type Mode"
+      },
+      {
+        "command": "performative.speedUp",
+        "title": "Performative: Speed Up Auto-Type"
+      },
+      {
+        "command": "performative.slowDown",
+        "title": "Performative: Slow Down Auto-Type"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "performative.autoType",
+        "key": "ctrl+shift+p",
+        "mac": "cmd+shift+a"
+      },
+      {
+        "command": "performative.speedUp",
+        "key": "ctrl+shift+up",
+        "mac": "cmd+shift+up"
+      },
+      {
+        "command": "performative.slowDown",
+        "key": "ctrl+shift+down",
+        "mac": "cmd+shift+down"
       }
     ]
   },

@@ -1,12 +1,40 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-export interface Problem {
+// Single-file problem (original format)
+export interface SingleFileProblem {
     task_id: string;
+    type: 'single';
     prompt: string;
     canonical_solution: string;
     test: string;
     entry_point: string;
+}
+
+// Multi-file problem (new format)
+export interface FileContent {
+    filename: string;
+    content: string;
+}
+
+export interface MultiFileProblem {
+    task_id: string;
+    type: 'multi';
+    description: string;
+    files: FileContent[];
+    entry_file: string;
+}
+
+// Union type for all problems
+export type Problem = SingleFileProblem | MultiFileProblem;
+
+// Type guards
+export function isSingleFileProblem(problem: Problem): problem is SingleFileProblem {
+    return problem.type === 'single' || !('files' in problem);
+}
+
+export function isMultiFileProblem(problem: Problem): problem is MultiFileProblem {
+    return problem.type === 'multi' && 'files' in problem;
 }
 
 export class ProblemManager {
@@ -32,7 +60,7 @@ export class ProblemManager {
         try {
             const parsed = JSON.parse(fileContent);
             if (Array.isArray(parsed)) {
-                this.problems = parsed as Problem[];
+                this.problems = parsed.map(p => this.normalizeProblem(p));
                 console.log(`Loaded ${this.problems.length} problems from HumanEval dataset (JSON array format)`);
                 return;
             }
@@ -44,14 +72,37 @@ export class ProblemManager {
         const lines = fileContent.split('\n').filter(line => line.trim() !== '');
         for (const line of lines) {
             try {
-                const problem = JSON.parse(line) as Problem;
-                this.problems.push(problem);
+                const problem = JSON.parse(line);
+                this.problems.push(this.normalizeProblem(problem));
             } catch (error) {
                 console.error(`Failed to parse line: ${line}`, error);
             }
         }
 
         console.log(`Loaded ${this.problems.length} problems from HumanEval dataset (JSONL format)`);
+    }
+
+    private normalizeProblem(raw: Record<string, unknown>): Problem {
+        // If it has a 'files' array, it's a multi-file problem
+        if (raw.files && Array.isArray(raw.files)) {
+            return {
+                task_id: raw.task_id as string,
+                type: 'multi',
+                description: raw.description as string || '',
+                files: raw.files as FileContent[],
+                entry_file: raw.entry_file as string
+            };
+        }
+        
+        // Otherwise, it's a single-file problem
+        return {
+            task_id: raw.task_id as string,
+            type: 'single',
+            prompt: raw.prompt as string,
+            canonical_solution: raw.canonical_solution as string,
+            test: raw.test as string,
+            entry_point: raw.entry_point as string
+        };
     }
 
     public getRandomProblem(): Problem | undefined {
@@ -62,7 +113,7 @@ export class ProblemManager {
         return this.problems[randomIndex];
     }
 
-    public getRunnableCode(problem: Problem): string {
+    public getRunnableCodeForSingleFile(problem: SingleFileProblem): string {
         // Combine prompt (function signature + docstring), canonical solution, and test
         const code = `${problem.prompt}${problem.canonical_solution}
 
