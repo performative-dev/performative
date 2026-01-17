@@ -4,7 +4,6 @@ import { FileDiff, generateProjectDiff, MultiFileProblem } from './types';
 export const EXECUTE_SCENE = 'EXECUTE_SCENE';
 export const NEXT_FILE = 'NEXT_FILE';
 export const DELETE_LINE = 'DELETE_LINE';
-export const CLEAR_FILE = 'CLEAR_FILE';
 export const SWITCH_TO_FILE = 'SWITCH_TO_FILE';
 
 interface FileScript {
@@ -15,7 +14,6 @@ interface FileScript {
 // Diff operation types
 type DiffOperation = 
     | { type: 'delete_file'; filename: string; lineCount: number; currentLine: number }
-    | { type: 'clear_file'; filename: string }
     | { type: 'write_file'; filename: string; content: string; charIndex: number }
     | { type: 'create_file'; filename: string; content: string; charIndex: number };
 
@@ -121,10 +119,13 @@ export class Director {
                     currentLine: 0
                 });
             } else if (diff.action === 'modify') {
-                // Clear file once, then write new content
+                // First delete all lines, then write new content
+                const lineCount = (diff.oldContent?.split('\n').length || 1);
                 this.diffOperations.push({
-                    type: 'clear_file',
-                    filename: diff.filename
+                    type: 'delete_file',
+                    filename: diff.filename,
+                    lineCount,
+                    currentLine: 0
                 });
                 this.diffOperations.push({
                     type: 'write_file',
@@ -188,9 +189,6 @@ export class Director {
                 this.currentDiffOpIndex++;
                 return this.getNextDiffAction();
             }
-        } else if (op.type === 'clear_file') {
-            this.currentDiffOpIndex++;
-            return CLEAR_FILE;
         } else if (op.type === 'write_file' || op.type === 'create_file') {
             if (op.charIndex >= op.content.length) {
                 // Move to next operation
