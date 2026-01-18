@@ -820,63 +820,305 @@ async function performMicroManager(): Promise<void> {
 <html>
 <head>
 	<style>
-		body {
-			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-			padding: 16px;
-			background: #1a1d21;
-			color: #d1d2d3;
+		* {
+			box-sizing: border-box;
 			margin: 0;
+			padding: 0;
 		}
-		.container {
+		body {
+			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+			background: #1a1d21;
+			height: 100vh;
 			display: flex;
-			gap: 12px;
-			align-items: flex-start;
+			overflow: hidden;
 		}
-		.avatar {
-			width: 40px;
-			height: 40px;
-			border-radius: 8px;
+		/* Sidebar */
+		.sidebar {
+			width: 220px;
+			background: #19171d;
+			display: flex;
+			flex-direction: column;
+			border-right: 1px solid rgba(255,255,255,0.1);
+		}
+		.workspace-header {
+			padding: 12px 16px;
+			border-bottom: 1px solid rgba(255,255,255,0.1);
+		}
+		.workspace-name {
+			font-size: 16px;
+			font-weight: 700;
+			color: #fff;
+			display: flex;
+			align-items: center;
+			gap: 6px;
+		}
+		.workspace-name::after {
+			content: '▾';
+			font-size: 10px;
+			opacity: 0.6;
+		}
+		.sidebar-section {
+			padding: 12px 0;
+		}
+		.section-header {
+			padding: 0 16px 8px;
+			font-size: 13px;
+			font-weight: 600;
+			color: #9a9b9e;
+			display: flex;
+			align-items: center;
+			gap: 6px;
+		}
+		.section-header::before {
+			content: '▾';
+			font-size: 8px;
+		}
+		.channel-item {
+			padding: 4px 16px;
+			font-size: 14px;
+			color: #b5b5b8;
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			cursor: pointer;
+		}
+		.channel-item:hover {
+			background: rgba(255,255,255,0.05);
+		}
+		.channel-item.active {
+			background: #1264a3;
+			color: #fff;
+		}
+		.channel-hash {
+			opacity: 0.6;
+		}
+		.dm-item {
+			padding: 4px 16px;
+			font-size: 14px;
+			color: #b5b5b8;
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			cursor: pointer;
+		}
+		.dm-item:hover {
+			background: rgba(255,255,255,0.05);
+		}
+		.dm-item.unread {
+			color: #fff;
+			font-weight: 600;
+		}
+		.dm-avatar {
+			width: 20px;
+			height: 20px;
+			border-radius: 4px;
 			background: #3f4248;
 		}
-		.content {
+		.dm-status {
+			width: 8px;
+			height: 8px;
+			border-radius: 50%;
+			background: #2eb67d;
+			margin-left: auto;
+		}
+		.unread-badge {
+			background: #E01E5A;
+			color: #fff;
+			font-size: 11px;
+			font-weight: 700;
+			padding: 1px 6px;
+			border-radius: 10px;
+			margin-left: auto;
+		}
+		/* Main content */
+		.main {
+			flex: 1;
+			display: flex;
+			flex-direction: column;
+			background: #1a1d21;
+		}
+		.chat-header {
+			padding: 12px 20px;
+			border-bottom: 1px solid rgba(255,255,255,0.1);
+			display: flex;
+			align-items: center;
+			gap: 8px;
+		}
+		.chat-title {
+			font-size: 16px;
+			font-weight: 700;
+			color: #fff;
+		}
+		.chat-status {
+			width: 8px;
+			height: 8px;
+			border-radius: 50%;
+			background: #2eb67d;
+		}
+		.messages-area {
+			flex: 1;
+			overflow-y: auto;
+			padding: 24px 20px;
+		}
+		.message-group {
+			display: flex;
+			gap: 12px;
+			margin-bottom: 32px;
+		}
+		.msg-avatar {
+			width: 36px;
+			height: 36px;
+			border-radius: 6px;
+			background: #3f4248;
+			flex-shrink: 0;
+		}
+		.msg-content {
 			flex: 1;
 		}
-		.header {
+		.msg-header {
 			display: flex;
 			align-items: baseline;
 			gap: 8px;
 			margin-bottom: 4px;
 		}
-		.name {
+		.msg-name {
+			font-size: 14px;
 			font-weight: 700;
 			color: #fff;
 		}
-		.time {
-			font-size: 12px;
+		.msg-time {
+			font-size: 11px;
 			color: #616061;
 		}
-		.message {
-			line-height: 1.46;
+		.msg-text {
+			font-size: 14px;
+			line-height: 1.5;
 			color: #d1d2d3;
 		}
-		.typing {
-			margin-top: 12px;
-			font-size: 12px;
+		.msg-text.new {
+			background: rgba(255, 220, 100, 0.08);
+			padding: 8px 10px;
+			margin: -4px -10px;
+			border-radius: 6px;
+			border-left: 3px solid #ECB22E;
+		}
+		.typing-indicator {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			padding: 8px 0;
 			color: #616061;
-			font-style: italic;
+			font-size: 13px;
+		}
+		.typing-dots {
+			display: flex;
+			gap: 3px;
+		}
+		.typing-dot {
+			width: 5px;
+			height: 5px;
+			background: #616061;
+			border-radius: 50%;
+			animation: bounce 1.4s ease-in-out infinite;
+		}
+		.typing-dot:nth-child(1) { animation-delay: 0s; }
+		.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+		.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+		@keyframes bounce {
+			0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+			30% { transform: translateY(-3px); opacity: 1; }
+		}
+		/* Message input */
+		.input-area {
+			padding: 16px 20px;
+			border-top: 1px solid rgba(255,255,255,0.1);
+		}
+		.input-box {
+			background: #222529;
+			border: 1px solid rgba(255,255,255,0.15);
+			border-radius: 8px;
+			padding: 10px 14px;
+			display: flex;
+			align-items: center;
+			gap: 10px;
+		}
+		.input-placeholder {
+			color: #616061;
+			font-size: 14px;
+			flex: 1;
+		}
+		.input-icons {
+			display: flex;
+			gap: 12px;
+			color: #616061;
+			font-size: 16px;
 		}
 	</style>
 </head>
 <body>
-	<div class="container">
-		<img class="avatar" src="https://i.pravatar.cc/40?img=${avatarId}" alt="avatar">
-		<div class="content">
-			<div class="header">
-				<span class="name">${msg.name}</span>
-				<span class="time">${time}</span>
+	<div class="sidebar">
+		<div class="workspace-header">
+			<div class="workspace-name">Acme Corp</div>
+		</div>
+		<div class="sidebar-section">
+			<div class="section-header">Channels</div>
+			<div class="channel-item"><span class="channel-hash">#</span> general</div>
+			<div class="channel-item"><span class="channel-hash">#</span> engineering</div>
+			<div class="channel-item"><span class="channel-hash">#</span> random</div>
+		</div>
+		<div class="sidebar-section">
+			<div class="section-header">Direct Messages</div>
+			<div class="dm-item unread">
+				<img class="dm-avatar" src="https://i.pravatar.cc/40?img=${avatarId}" alt="">
+				${msg.name}
+				<span class="unread-badge">1</span>
 			</div>
-			<div class="message">${msg.message}</div>
-			<div class="typing">${msg.name.split(' ')[0]} is typing...</div>
+			<div class="dm-item">
+				<img class="dm-avatar" src="https://i.pravatar.cc/40?img=${(avatarId + 10) % 70}" alt="">
+				Sarah Chen
+				<span class="dm-status"></span>
+			</div>
+			<div class="dm-item">
+				<img class="dm-avatar" src="https://i.pravatar.cc/40?img=${(avatarId + 20) % 70}" alt="">
+				Mike Peters
+			</div>
+		</div>
+	</div>
+	<div class="main">
+		<div class="chat-header">
+			<img class="dm-avatar" src="https://i.pravatar.cc/40?img=${avatarId}" alt="">
+			<span class="chat-title">${msg.name}</span>
+			<span class="chat-status"></span>
+		</div>
+		<div class="messages-area">
+			<div class="message-group">
+				<img class="msg-avatar" src="https://i.pravatar.cc/72?img=${avatarId}" alt="">
+				<div class="msg-content">
+					<div class="msg-header">
+						<span class="msg-name">${msg.name}</span>
+						<span class="msg-time">${time}</span>
+					</div>
+					<div class="msg-text new">${msg.message}</div>
+				</div>
+			</div>
+			<div class="typing-indicator">
+				<div class="typing-dots">
+					<div class="typing-dot"></div>
+					<div class="typing-dot"></div>
+					<div class="typing-dot"></div>
+				</div>
+				<span>${msg.name.split(' ')[0]} is typing...</span>
+			</div>
+		</div>
+		<div class="input-area">
+			<div class="input-box">
+				<span class="input-placeholder">Message ${msg.name.split(' ')[0]}</span>
+				<div class="input-icons">
+					<span>@</span>
+					<span>📎</span>
+					<span>😊</span>
+				</div>
+			</div>
 		</div>
 	</div>
 </body>
