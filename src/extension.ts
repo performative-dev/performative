@@ -680,14 +680,46 @@ async function performIntrusiveThought(): Promise<void> {
 	const startOffset = editor.document.offsetAt(editor.selection.active);
 	let charsInserted = 0;
 
+	// Get indentation of the previous line
+	const currentPos = editor.selection.active;
+	const lineAboveNum = currentPos.line > 0 ? currentPos.line - 1 : 0;
+	const lineAbove = editor.document.lineAt(lineAboveNum);
+	const indentationMatch = lineAbove.text.match(/^\s*/);
+	const indentation = indentationMatch ? indentationMatch[0] : '';
+
+	// Insert a newline and indentation first
+	const insertNewlineIndent = '\n' + indentation;
+	const insertPositionNewline = editor.document.positionAt(startOffset);
+	const successNewline = await editor.edit(
+		(editBuilder) => {
+			editBuilder.insert(insertPositionNewline, insertNewlineIndent);
+		},
+		{ undoStopBefore: false, undoStopAfter: false },
+  	);
+	if (successNewline) {
+		charsInserted += insertNewlineIndent.length;
+		editor.selection = new vscode.Selection(
+			editor.document.positionAt(startOffset + charsInserted),
+			editor.document.positionAt(startOffset + charsInserted)
+		);
+		editor.revealRange(
+			new vscode.Range(editor.selection.active, editor.selection.active),
+			vscode.TextEditorRevealType.InCenterIfOutsideViewport,
+		);
+		await sleep(30 + Math.random() * 40);
+	}
+
 	// Type the intrusive thought character by character (normal typing speed)
 	// IMPORTANT: Always insert at explicit calculated position, not editor.selection.active
 	// This prevents cursor drift during async operations
 	for (const char of thought) {
 		const insertPosition = editor.document.positionAt(startOffset + charsInserted);
-		const success = await editor.edit(editBuilder => {
-			editBuilder.insert(insertPosition, char);
-		}, { undoStopBefore: false, undoStopAfter: false });
+		const success = await editor.edit(
+			(editBuilder) => {
+				editBuilder.insert(insertPosition, char);
+			},
+			{ undoStopBefore: false, undoStopAfter: false },
+		);
 
 		if (success) {
 			charsInserted++;
