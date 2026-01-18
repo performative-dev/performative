@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { Director, EXECUTE_SCENE, NEXT_FILE, DELETE_LINE } from './director';
+import { Director, EXECUTE_SCENE, NEXT_FILE, DELETE_LINE, SWITCH_TO_FILE } from './director';
 import { 
 	generateMultiFileProblem,
 	extendProject,
@@ -53,7 +53,7 @@ const guiActions = [
 	{ name: 'single layout', command: 'custom:singleLayout' },
 	{ name: 'two columns', command: 'custom:twoColumns' },
 	// Copilot distraction - opens copilot chat with a random funny question
-	{ name: 'copilot distraction', command: 'custom:copilotDistraction' },
+	// { name: 'copilot distraction', command: 'custom:copilotDistraction' },
 	// Intrusive thought - types an embarrassing comment then frantically deletes it
 	{ name: 'intrusive thought', command: 'custom:intrusiveThought' },
 	// Heavy install - opens terminal and simulates npm dependency hell
@@ -1624,9 +1624,8 @@ async function createFirstFile(): Promise<void> {
 	await vscode.workspace.fs.writeFile(fileUri, new Uint8Array());
 	createdFiles.add(filename);
 
-	// Open the file in the editor
-	const document = await vscode.workspace.openTextDocument(fileUri);
-	await vscode.window.showTextDocument(document, { preview: false });
+	// Open the file in the editor and wait for it to be active
+	await showDocumentAndWaitForActive(fileUri);
 
 	log(`Created and opened: ${filePath}`);
 
@@ -1755,34 +1754,43 @@ function registerTypeCommand(context: vscode.ExtensionContext): void {
 				return;
 			}
 			
+			if (nextChar === SWITCH_TO_FILE) {
+				const diffFilename = director!.getDiffFilename();
+				if (diffFilename) {
+					log(`Switching to diff file: ${diffFilename}`);
+					await switchToDiffFile(diffFilename);
+				}
+				return;
+			}
+			
 			log(`Next char: "${nextChar === '\n' ? '\\n' : nextChar}" (file ${progress.fileIndex + 1}/${progress.totalFiles}, char ${progress.current}/${progress.total})`);
 
 			if (nextChar === NEXT_FILE) {
 				log('Current file complete! Moving to next file...');
 				await handleNextFile(currentEditor);
+				await sleep(100); // Allow UI to settle before next keystroke
 			} else if (nextChar === EXECUTE_SCENE) {
 				log('Script complete! Executing scene...');
 				await executeScene(currentEditor);
 			} else {
-				// Check if we need to switch files for diff mode
+				// This 'else' block now handles only printable characters for both modes
 				if (director!.isInDiffMode()) {
+					// In diff mode, we might need to switch files before typing
 					const diffFilename = director!.getDiffFilename();
 					const currentFilename = path.basename(currentEditor.document.uri.fsPath);
 					if (diffFilename && diffFilename !== currentFilename) {
-						log(`Switching to diff file: ${diffFilename}`);
+						log(`Switching to diff file before typing: ${diffFilename}`);
 						await switchToDiffFile(diffFilename);
-						// Re-get editor after switch
-						const newEditor = vscode.window.activeTextEditor;
-						if (newEditor) {
-							// In diff mode, insert at tracked write position
-							const insertPos = newEditor.document.positionAt(director!.getDiffWritePosition());
-							await newEditor.edit(editBuilder => {
+						// After switching, the next keystroke will handle the typing in the correct file
+						// We need to re-process this character, so we'll push it back onto the front of the queue
+						// and process immediately.
+						keystrokeQueue.unshift(async () => {
+							await currentEditor.edit(editBuilder => {
+								const insertPos = currentEditor.document.positionAt(director!.getDiffWritePosition());
 								editBuilder.insert(insertPos, nextChar);
-							}, { undoStopBefore: false, undoStopAfter: false });
-							// Update cursor to after inserted char
-							const newCursorPos = newEditor.document.positionAt(director!.getDiffWritePosition() + 1);
-							newEditor.selection = new vscode.Selection(newCursorPos, newCursorPos);
-						}
+							});
+						});
+						// No need to process this keystroke further, let the next one handle it.
 						return;
 					}
 
@@ -1795,36 +1803,34 @@ function registerTypeCommand(context: vscode.ExtensionContext): void {
 					// Move cursor to after inserted char
 					const newCursorPos = currentEditor.document.positionAt(director!.getDiffWritePosition() + 1);
 					currentEditor.selection = new vscode.Selection(newCursorPos, newCursorPos);
-					currentEditor.revealRange(
-						new vscode.Range(newCursorPos, newCursorPos),
-						vscode.TextEditorRevealType.InCenterIfOutsideViewport
-					);
+				} else {
+					// Non-diff mode: Insert at position tracked by Director's progress
+					const insertOffset = progress.current > 0 ? progress.current - 1 : 0;
+					const insertPosition = currentEditor.document.positionAt(insertOffset);
 
-					// Check if we should trigger a GUI action
-					await checkAndTriggerGuiAction();
-					return;
+					await currentEditor.edit(editBuilder => {
+						editBuilder.insert(insertPosition, nextChar);
+					}, { undoStopBefore: false, undoStopAfter: false });
+
+					// Move cursor to after inserted char
+					const newCursorPos = currentEditor.document.positionAt(progress.current);
+					currentEditor.selection = new vscode.Selection(newCursorPos, newCursorPos);
 				}
 
-				// Non-diff mode: Insert the scripted character at cursor position
-				await currentEditor.edit(editBuilder => {
-					editBuilder.insert(currentEditor.selection.active, nextChar);
-				}, { undoStopBefore: false, undoStopAfter: false });
-
-				// Scroll to keep cursor visible
+				// Common logic for both modes after typing a character
 				currentEditor.revealRange(
 					new vscode.Range(currentEditor.selection.active, currentEditor.selection.active),
 					vscode.TextEditorRevealType.InCenterIfOutsideViewport
 				);
 
-				// If we just typed a newline and there's a pending file switch, do it now
 				if (nextChar === '\n' && pendingFileSwitch && director!.isMultiFile()) {
 					pendingFileSwitch = false;
 					log('Executing pending file switch after newline (manual)');
 					await handleRandomFileSwitch(currentEditor);
+					await sleep(100); // Allow UI to settle before next keystroke
 					return;
 				}
 
-				// Check if we should trigger a GUI action
 				await checkAndTriggerGuiAction();
 			}
 		});
@@ -1858,11 +1864,7 @@ async function switchToDiffFile(filename: string): Promise<void> {
 	}
 	
 	try {
-		const document = await vscode.workspace.openTextDocument(fileUri);
-		const editor = await vscode.window.showTextDocument(document, {
-			viewColumn: vscode.ViewColumn.One,
-			preview: false
-		});
+		const editor = await showDocumentAndWaitForActive(fileUri);
 		
 		// Position cursor at start of file
 		const startPos = new vscode.Position(0, 0);
@@ -1911,12 +1913,7 @@ async function handleNextFile(currentEditor: vscode.TextEditor): Promise<void> {
 		createdFiles.add(nextFile.filename);
 	}
 
-	// Always open in ViewColumn.One
-	const document = await vscode.workspace.openTextDocument(fileUri);
-	const editor = await vscode.window.showTextDocument(document, {
-		viewColumn: vscode.ViewColumn.One,
-		preview: false
-	});
+	const editor = await showDocumentAndWaitForActive(fileUri);
 
 	// Position cursor using director's tracked position
 	const progress = director.getProgress();
@@ -1953,12 +1950,7 @@ async function handleRandomFileSwitch(currentEditor: vscode.TextEditor): Promise
 		createdFiles.add(newFile.filename);
 	}
 
-	// Always open in ViewColumn.One to ensure we're typing in the main editor
-	const document = await vscode.workspace.openTextDocument(fileUri);
-	const editor = await vscode.window.showTextDocument(document, {
-		viewColumn: vscode.ViewColumn.One,
-		preview: false
-	});
+	const editor = await showDocumentAndWaitForActive(fileUri);
 
 	// Position cursor using director's tracked position for this file
 	const progress = director.getProgress();
@@ -1967,6 +1959,29 @@ async function handleRandomFileSwitch(currentEditor: vscode.TextEditor): Promise
 	editor.revealRange(new vscode.Range(cursorPos, cursorPos));
 
 	log(`Now on file ${progress.fileIndex + 1}/${progress.totalFiles}: ${newFile.filename} at char ${progress.current}`);
+}
+
+// Robustly show a document and wait for it to become the active editor
+function showDocumentAndWaitForActive(docUri: vscode.Uri): Promise<vscode.TextEditor> {
+	return new Promise(resolve => {
+		vscode.window.showTextDocument(docUri, {
+			viewColumn: vscode.ViewColumn.One,
+			preview: false,
+		}).then(editor => {
+			// Check if the editor is already active.
+			if (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.uri.toString() === docUri.toString()) {
+				resolve(editor);
+			} else {
+				// If not, wait for the event that signals the active editor has changed.
+				const disposable = vscode.window.onDidChangeActiveTextEditor(e => {
+					if (e && e.document.uri.toString() === docUri.toString()) {
+						disposable.dispose();
+						resolve(e);
+					}
+				});
+			}
+        });
+	});
 }
 
 // Run a command in terminal and wait for it to complete, returning the exit code
