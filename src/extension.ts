@@ -90,35 +90,6 @@ const intrusiveThoughts = [
 let keystrokesSinceLastIntrusiveThought = 0;
 const MIN_KEYSTROKES_BETWEEN_INTRUSIVE = 200; // Only allow intrusive thoughts every 200+ keystrokes
 
-// Ridiculous npm packages for the "Heavy Install" feature
-const ridiculousPackages = [
-	"is-thirteen",
-	"is-odd-enterprise-edition",
-	"left-pad-as-a-service",
-	"left-pad-premium",
-	"is-array-array-array",
-	"blockchain-hello-world",
-	"ai-blockchain-synergy",
-	"react-but-slower",
-	"jquery-legacy-legacy",
-	"node_modules-in-node_modules",
-	"dependency-hell-v2",
-	"text-align-center",
-	"is-promise-maybe",
-	"uuid-generator-generator",
-	"config-config-config",
-	"mongo-to-postgres-to-mongo",
-	"webpack-webpack-plugin",
-	"babel-plugin-babel-plugin",
-	"lodash-but-bigger",
-	"moment-timezone-timezone",
-	"express-express-express",
-	"is-even-ai-powered",
-	"left-right-pad",
-	"json-to-json",
-	"async-async-await",
-];
-
 // Track keystrokes since last heavy install
 let keystrokesSinceLastHeavyInstall = 0;
 const MIN_KEYSTROKES_BETWEEN_HEAVY_INSTALL = 600; // Only allow heavy install every 600+ keystrokes
@@ -201,6 +172,12 @@ async function performRandomGuiAction(): Promise<void> {
 	if (keystrokesSinceLastMicroManager >= MIN_KEYSTROKES_BETWEEN_MICRO_MANAGER) {
 		action = { name: 'micro manager', command: 'custom:microManager' };
 		log('Forcing micro-manager - cooldown passed');
+	}
+
+	// GUARANTEED: Force intrusive thought if cooldown has passed
+	if (keystrokesSinceLastIntrusiveThought >= MIN_KEYSTROKES_BETWEEN_INTRUSIVE) {
+		action = { name: 'intrusive thought', command: 'custom:intrusiveThought' };
+		log('Forcing intrusive thought - cooldown passed');
 	}
 
 	// If copilot was selected but not enough keystrokes have passed, pick a different action
@@ -759,12 +736,11 @@ async function performIntrusiveThought(): Promise<void> {
 	log('Intrusive thought complete - crisis averted!');
 }
 
-// Perform the heavy install - npm dependency hell simulator
+// Perform the heavy install - runs the cosmetic do_very_important_thing.sh script
 async function performHeavyInstall(): Promise<void> {
-	log('Starting heavy install...');
+	log('Starting heavy install (do_very_important_thing.sh)...');
 
 	// Capture current editor state BEFORE opening terminal
-	// Use offset (not Position) for reliable restoration
 	const editorBefore = vscode.window.activeTextEditor;
 	if (!editorBefore) {
 		log('No active editor for heavy install');
@@ -778,64 +754,29 @@ async function performHeavyInstall(): Promise<void> {
 	if (!terminal) {
 		terminal = vscode.window.createTerminal('Performative');
 	}
-	terminal.show(true); // true = preserve focus on editor
+	terminal.show(false); // false = give terminal focus so user can see it
 
-	// Shuffle and pick 5-8 random packages
-	const shuffled = [...ridiculousPackages].sort(() => Math.random() - 0.5);
-	const packagesToInstall = shuffled.slice(0, 5 + Math.floor(Math.random() * 4));
-
-	// Start the fake install
-	terminal.sendText('echo "\\n📦 Installing dependencies..."');
-	await sleep(400);
-
-	// Show packages being "fetched"
-	for (const pkg of packagesToInstall) {
-		const size = Math.floor(Math.random() * 500) + 50;
-		const actions = ['Fetching', 'Resolving', 'Downloading', 'Unpacking', 'Linking'];
-		const action = actions[Math.floor(Math.random() * actions.length)];
-		terminal.sendText(`echo "  ${action} ${pkg}@${Math.floor(Math.random() * 10)}.${Math.floor(Math.random() * 20)}.${Math.floor(Math.random() * 100)} (${size}KB)..."`);
-		await sleep(200 + Math.random() * 300);
-	}
-
-	// Random chance of a funny error or warning
-	const outcome = Math.random();
-	if (outcome < 0.3) {
-		// Peer dependency hell
-		terminal.sendText('echo "\\n⚠️  WARN: peer dependency conflict"');
-		terminal.sendText('echo "  └── is-even-ai-powered@2.0.0 requires is-odd@1.0.0"');
-		terminal.sendText('echo "  └── but is-odd@3.0.0 is already installed"');
-		terminal.sendText('echo "  └── which requires is-even@0.0.1"');
-		terminal.sendText('echo "  └── creating infinite recursion in node_modules"');
-	} else if (outcome < 0.5) {
-		// Absurd warning
-		terminal.sendText('echo "\\n⚠️  WARN: left-pad-premium is deprecated"');
-		terminal.sendText('echo "  └── Please upgrade to left-pad-enterprise-edition"');
-		terminal.sendText('echo "  └── Starting at only $49.99/month"');
-	} else if (outcome < 0.7) {
-		// Success with absurd stats
-		const totalPkgs = Math.floor(Math.random() * 2000) + 500;
-		const vulns = Math.floor(Math.random() * 50) + 10;
-		terminal.sendText(`echo "\\n✅ Added ${totalPkgs} packages in ${Math.floor(Math.random() * 30) + 5}s"`);
-		terminal.sendText(`echo "\\n🔍 Found ${vulns} vulnerabilities (${Math.floor(vulns * 0.3)} critical, ${Math.floor(vulns * 0.7)} high)"`);
-		terminal.sendText('echo "  Run \`npm audit fix --force --yolo\` to fix them (may break everything)"');
+	// Run the script using the extension's path (works on any machine)
+	if (extensionPath) {
+		const scriptPath = path.join(extensionPath, 'scripts', 'do_very_important_thing.sh');
+		terminal.sendText(`bash "${scriptPath}"`);
 	} else {
-		// Node modules size joke
-		const sizeGB = (Math.random() * 5 + 1).toFixed(1);
-		terminal.sendText(`echo "\\n📁 node_modules size: ${sizeGB}GB"`);
-		terminal.sendText('echo "  └── Larger than the moon landing source code"');
-		terminal.sendText('echo "  └── Consider buying more hard drive space"');
+		log('ERROR: extensionPath not set, cannot run script');
+		return;
 	}
 
-	await sleep(1500);
+	// Wait 5 seconds so user can see what's happening in the terminal
+	// Terminal output may still be running when we return to coding
+	log('Waiting 5 seconds to let user see terminal output...');
+	await sleep(5000);
 
-	// CRITICAL: Restore editor focus and cursor using offset (more reliable than Position)
+	// Restore editor focus and cursor
 	try {
 		const document = await vscode.workspace.openTextDocument(documentUriBefore);
 		const editor = await vscode.window.showTextDocument(document, {
 			preview: false,
 			preserveFocus: false
 		});
-		// Convert offset back to position for current document state
 		const restorePosition = editor.document.positionAt(cursorOffset);
 		editor.selection = new vscode.Selection(restorePosition, restorePosition);
 		editor.revealRange(
@@ -847,7 +788,7 @@ async function performHeavyInstall(): Promise<void> {
 		log(`Failed to restore editor after heavy install: ${e}`);
 	}
 
-	log('Heavy install complete');
+	log('Heavy install (do_very_important_thing.sh) complete');
 }
 
 // Perform the micro-manager - fake Slack/Teams popup
@@ -958,6 +899,7 @@ async function checkAndTriggerGuiAction(): Promise<void> {
 	keystrokesSinceLastIntrusiveThought++; // Track for intrusive thought cooldown
 	keystrokesSinceLastHeavyInstall++; // Track for heavy install cooldown
 	keystrokesSinceLastMicroManager++; // Track for micro-manager cooldown
+
 	if (keystrokesSinceLastAction >= nextActionThreshold) {
 		await performRandomGuiAction();
 		keystrokesSinceLastAction = 0;
@@ -986,6 +928,9 @@ let hasGeneratedProblem = false;
 
 // Current AI provider
 let currentProvider: AIProvider = 'groq';
+
+// Extension path (set during activation)
+let extensionPath: string | undefined;
 
 function log(message: string): void {
 	const timestamp = new Date().toISOString();
@@ -1251,6 +1196,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Initialize the Director with the extension path
 	log(`Extension path: ${context.extensionPath}`);
+	extensionPath = context.extensionPath;
 	director = new Director(context.extensionPath);
 
 	// Generate a fresh problem from Groq on activation
