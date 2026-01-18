@@ -53,7 +53,7 @@ const guiActions = [
 	{ name: 'single layout', command: 'custom:singleLayout' },
 	{ name: 'two columns', command: 'custom:twoColumns' },
 	// Copilot distraction - opens copilot chat with a random funny question
-	// { name: 'copilot distraction', command: 'custom:copilotDistraction' },
+	{ name: 'copilot distraction', command: 'custom:copilotDistraction' },
 	// Intrusive thought - types an embarrassing comment then frantically deletes it
 	{ name: 'intrusive thought', command: 'custom:intrusiveThought' },
 	// Heavy install - opens terminal and simulates npm dependency hell
