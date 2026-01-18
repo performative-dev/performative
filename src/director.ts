@@ -186,13 +186,23 @@ export class Director {
                 return DELETE_LINE;
             } else {
                 // Move to next operation
+                const currentFilename = op.filename;
                 this.currentDiffOpIndex++;
+                const nextOp = this.getCurrentDiffOperation();
+                if (nextOp && nextOp.filename !== currentFilename) {
+                    return SWITCH_TO_FILE;
+                }
                 return this.getNextDiffAction();
             }
         } else if (op.type === 'write_file' || op.type === 'create_file') {
             if (op.charIndex >= op.content.length) {
                 // Move to next operation
+                const currentFilename = op.filename;
                 this.currentDiffOpIndex++;
+                const nextOp = this.getCurrentDiffOperation();
+                if (nextOp && nextOp.filename !== currentFilename) {
+                    return SWITCH_TO_FILE;
+                }
                 return this.getNextDiffAction();
             }
             const char = op.content[op.charIndex];
@@ -207,6 +217,16 @@ export class Director {
         const op = this.getCurrentDiffOperation();
         return op?.filename;
     }
+
+      // Get current write position in diff mode (charIndex - 1 since it was already incremented)                                                        
+    public getDiffWritePosition(): number {                                    
+        const op = this.getCurrentDiffOperation();                             
+          if (op && (op.type === 'write_file' || op.type === 'create_file'       
+          )) {                                                                           
+          return op.charIndex > 0 ? op.charIndex - 1 : 0;                    
+        }                                                                      
+       return 0;                                                              
+    }      
 
     public getNextChar(): string {
         // If in diff mode, use diff-based character generation
