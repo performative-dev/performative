@@ -186,13 +186,23 @@ export class Director {
                 return DELETE_LINE;
             } else {
                 // Move to next operation
+                const currentFilename = op.filename;
                 this.currentDiffOpIndex++;
+                const nextOp = this.getCurrentDiffOperation();
+                if (nextOp && nextOp.filename !== currentFilename) {
+                    return SWITCH_TO_FILE;
+                }
                 return this.getNextDiffAction();
             }
         } else if (op.type === 'write_file' || op.type === 'create_file') {
             if (op.charIndex >= op.content.length) {
                 // Move to next operation
+                const currentFilename = op.filename;
                 this.currentDiffOpIndex++;
+                const nextOp = this.getCurrentDiffOperation();
+                if (nextOp && nextOp.filename !== currentFilename) {
+                    return SWITCH_TO_FILE;
+                }
                 return this.getNextDiffAction();
             }
             const char = op.content[op.charIndex];
