@@ -5,7 +5,7 @@ import { MultiFileProblem, GENERATION_PROMPT } from './types';
 async function callOpenAIAPI(apiKey: string, prompt: string): Promise<MultiFileProblem> {
     return new Promise((resolve, reject) => {
         const requestBody = JSON.stringify({
-            model: 'gpt-4o-mini',
+            model: 'gpt-4o',
             messages: [
                 {
                     role: 'user',
