@@ -421,13 +421,12 @@ async function performCopilotDistraction(): Promise<void> {
 		}
 		
 		// Wait for the AI to generate a response
-		// Conservative wait time - assume response takes a while
-		const responseWaitTime = 12000 + Math.random() * 5000; // 12-17 seconds
+		const responseWaitTime = 4500 + Math.random() * 1000; // 4.5-5.5 seconds
 		log(`Waiting ${Math.round(responseWaitTime)}ms for Copilot response...`);
 		await sleep(responseWaitTime);
 		
 		// "Read" the response - stay on the chat for a bit longer
-		const readingTime = 3000 + Math.random() * 2000; // 3-5 seconds of "reading"
+		const readingTime = 4500 + Math.random() * 1000; // 4.5-5.5 seconds of "reading"
 		log(`Reading response for ${Math.round(readingTime)}ms...`);
 		await sleep(readingTime);
 		
@@ -452,9 +451,9 @@ async function performCopilotDistraction(): Promise<void> {
 			}
 		}
 		
-		// Wait 3 seconds before closing the chat window
-		log('Waiting 3 seconds before closing chat...');
-		await sleep(3000);
+		// Wait before closing the chat window
+		log('Waiting before closing chat...');
+		await sleep(1500);
 		
 		// Now close the copilot chat
 		log('Closing Copilot Chat...');

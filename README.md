@@ -1,4 +1,4 @@
-# Performative Developer 🎭
+# Performative Developer
 
 A playful yet practical VS Code extension that **emulates real coding** — the pauses, the context switches, the terminal runs — while still generating real, runnable projects.
 
@@ -11,7 +11,7 @@ In today's fast-paced tech world, "looking busy" is half the battle. Whether you
 We asked ourselves: Why should you have to type code to look like you're coding? The Hollywood hacker aesthetic shouldn't require actual effort.
 ---
 
-## What We Built (Quick Summary)
+## What We Built
 
 **Performative Developer** is a VS Code extension that **auto-types code like a human**, generates **multi-file Python projects with AI**, simulates **real developer workflows & distractions**, and can **run the result** in a terminal. 
 
@@ -36,30 +36,30 @@ or more righteous scenarios like:
 
 ## Features
 
-### 🎬 Performance Mode
+### Performance Mode
 - Auto-types code character-by-character for a human feel
 - Supports both **single-file** and **multi-file** projects
 
-### ⌨️ Auto-Type Controls
+### ⌨Auto-Type Controls
 - Start/stop continuous typing
 - Speed up or slow down the typing pace
 
-### 🧠 AI Project Generation
+### AI Project Generation
 - Generates **multi-file Python projects** using:
   - Groq
   - Google Gemini
   - OpenAI 
 - Produces runnable, standard-library projects
 
-### 🧪 Scene Execution
+### Scene Execution
 - Runs the generated project in a terminal
 - Auto-generates a README for the project
 
-### 🪄 Diff-Based Extension Flow
+### Diff-Based Extension Flow
 - After a run, it can ask Copilot for an improvement
 - Applies changes file-by-file, typing out diffs in real time
 
-### 🎭 Performative Distractions
+### Performative Distractions
 - Simulated interruptions (micro-manager popups)
 - Fake dependency installs in terminal
 - Intrusive thoughts that appear and get deleted
@@ -117,4 +117,4 @@ We built **Performative Developer** with the intention of making an **entertaini
 
 ## License
 
-MIT
+Apache

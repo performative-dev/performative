@@ -57,7 +57,7 @@ export function getProviderDisplayName(provider: AIProvider): string {
         case 'gemini':
             return 'Google Gemini 2.0 Flash';
         case 'openai':
-            return 'OpenAI (GPT-4o mini)';
+            return 'OpenAI (GPT-4o)';
         default:
             return provider;
     }
